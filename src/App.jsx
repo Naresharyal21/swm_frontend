@@ -2,7 +2,6 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 
 import 'leaflet/dist/leaflet.css'
 
-
 import { ProtectedRoute } from './routes/ProtectedRoute'
 import { RoleRoute } from './routes/RoleRoute'
 import { AppShell } from './components/layout/AppShell'
@@ -56,10 +55,21 @@ import HouseholdSettingsPage from './pages/citizen/HouseholdSettingsPage'
 import CollectionSchedulePage from './pages/citizen/CollectionSchedulePage'
 import MissedPickupPage from './pages/citizen/MissedPickupPage'
 
+// Billing redirect pages (public routes)
+import BillingSuccessPage from './pages/citizen/BillingSuccessPage'
+import BillingPendingPage from './pages/citizen/BillingPendingPage'
+import BillingFailedPage from './pages/citizen/BillingFailedPage'
+
+
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/app" replace />} />
+
+      {/* ✅ Payment redirect pages (must be top-level, not under /app) */}
+      <Route path="/billing/success" element={<BillingSuccessPage />} />
+      <Route path="/billing/pending" element={<BillingPendingPage />} />
+      <Route path="/billing/failed" element={<BillingFailedPage />} />
 
       <Route element={<AuthLayout />}>
         <Route path="/login" element={<LoginPage />} />
@@ -71,7 +81,7 @@ export default function App() {
         <Route path="/app" element={<AppShell />}>
           <Route index element={<DashboardPage />} />
 
-          <Route element={<RoleRoute roles={["ADMIN"]} />}>
+          <Route element={<RoleRoute roles={['ADMIN']} />}>
             <Route path="admin/users" element={<UsersPage />} />
             <Route path="admin/zones" element={<ZonesPage />} />
             <Route path="admin/households" element={<HouseholdsPage />} />
@@ -84,7 +94,7 @@ export default function App() {
             <Route path="admin/telemetry" element={<TelemetryPage />} />
           </Route>
 
-          <Route element={<RoleRoute roles={["ADMIN", "SUPERVISOR"]} />}>
+          <Route element={<RoleRoute roles={['ADMIN', 'SUPERVISOR']} />}>
             <Route path="ops/cases" element={<CasesPage />} />
             <Route path="ops/tasks" element={<TasksPage />} />
             <Route path="ops/routes" element={<RoutesPage />} />
@@ -93,14 +103,14 @@ export default function App() {
             <Route path="ops/billing" element={<BillingGeneratePage />} />
           </Route>
 
-          <Route element={<RoleRoute roles={["CREW"]} />}>
+          <Route element={<RoleRoute roles={['CREW']} />}>
             <Route path="crew/today" element={<TodayRoutePage />} />
             <Route path="crew/tasks" element={<CrewTasksPage />} />
             <Route path="crew/recyclables" element={<RecyclablesReviewPage />} />
             <Route path="crew/exceptions" element={<ExceptionsLogPage />} />
           </Route>
 
-          <Route element={<RoleRoute roles={["CITIZEN"]} />}>
+          <Route element={<RoleRoute roles={['CITIZEN']} />}>
             <Route path="citizen/wallet" element={<WalletPage />} />
             <Route path="citizen/invoices" element={<InvoicesPage />} />
             <Route path="citizen/billing-plans" element={<CitizenBillingPlansPage />} />

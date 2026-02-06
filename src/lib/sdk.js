@@ -13,8 +13,7 @@ export const sdk = {
     listUsers: (params) => api.get('/admin/users', { params }).then(unwrap),
     createUser: (payload) => api.post('/admin/users', payload).then(unwrap),
     updateUser: (id, payload) => api.put(`/admin/users/${id}`, payload).then(unwrap),
-deleteUser: (id) => api.delete(`/admin/users/${id}`).then(unwrap),
-
+    deleteUser: (id) => api.delete(`/admin/users/${id}`).then(unwrap),
 
     listZones: (params) => api.get('/admin/zones', { params }).then(unwrap),
     createZone: (payload) => api.post('/admin/zones', payload).then(unwrap),
@@ -112,6 +111,10 @@ deleteUser: (id) => api.delete(`/admin/users/${id}`).then(unwrap),
     listInvoices: (params) => api.get('/citizen/invoices', { params }).then(unwrap),
     listBillingPlans: (params) => api.get('/citizen/billing-plans', { params }).then(unwrap),
 
+    // ✅ eSewa subscription (plan-based)
+    initiateEsewa: (planId) => api.post('/payments/esewa/initiate', { planId }).then(unwrap),
+    esewaStatus: (txUuid) => api.get(`/payments/esewa/status/${txUuid}`).then(unwrap),
+
     updateHouseholdPlan: (householdId, payload) =>
       api.put(`/citizen/households/${householdId}/plan`, payload).then(unwrap),
     updatePickupSchedule: (householdId, payload) =>
@@ -129,18 +132,14 @@ deleteUser: (id) => api.delete(`/admin/users/${id}`).then(unwrap),
         fd.append(k, String(v))
       })
       ;(files || []).forEach((f) => fd.append('files', f))
+
       return api
         .post('/citizen/recyclables/submissions', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then(unwrap)
     },
     listRecyclables: (params) => api.get('/citizen/recyclables/submissions', { params }).then(unwrap),
 
-    listMyHouseholds:  () => api.get('/citizen/households/me').then(unwrap),
-
-  //   listMyHouseholds: () =>
-  // api.get('/citizen/households/me').then(unwrap),
-    //{list: async () => unwrap(await http.get('/citizen/households')),},
-
+    listMyHouseholds: () => api.get('/citizen/households/me').then(unwrap),
 
     notifications: (params) => api.get('/citizen/notifications', { params }).then(unwrap),
     markNotificationRead: (id) => api.put(`/citizen/notifications/${id}/read`).then(unwrap),
