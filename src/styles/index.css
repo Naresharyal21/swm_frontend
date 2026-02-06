@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 248 250 252;
+  --fg: 15 23 42;
+  --muted: 100 116 139;
+  --card: 255 255 255;
+  --border: 226 232 240;
+  --ring: 22 163 74;
+  --brand: 22 163 74;   /* primary green */
+  --brand2: 5 150 105;  /* teal-green accent */
+  --danger: 220 38 38;
+  --warning: 245 158 11;
+}
+
+.dark {
+  --bg: 9 14 18;
+  --fg: 226 232 240;
+  --muted: 148 163 184;
+  --card: 12 19 24;
+  --border: 30 41 59;
+  --ring: 34 197 94;
+  --brand: 34 197 94;
+  --brand2: 16 185 129;
+  --danger: 248 113 113;
+  --warning: 251 191 36;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+* {
+  border-color: rgb(var(--border));
+}
+
+::selection {
+  background: rgba(var(--brand), 0.25);
+}
+
+/* Subtle animated feel without heavy JS */
+@media (prefers-reduced-motion: no-preference) {
+  .hover-lift {
+    transition: transform 180ms ease, box-shadow 180ms ease;
+  }
+  .hover-lift:hover {
+    transform: translateY(-2px);
+  }
+}
+
+@layer utilities {
+  .bg-app {
+    background-color: rgb(var(--bg));
+    background-image:
+      radial-gradient(700px circle at 12% 8%, rgba(var(--brand), 0.16), transparent 48%),
+      radial-gradient(800px circle at 88% 14%, rgba(var(--brand2), 0.12), transparent 55%);
+    background-attachment: fixed;
+  }
+  .text-app { color: rgb(var(--fg)); }
+  .text-muted { color: rgb(var(--muted)); }
+  .bg-card { background-color: rgb(var(--card)); }
+  .border-app { border-color: rgb(var(--border)); }
+  .ring-brand { --tw-ring-color: rgb(var(--ring)); }
+  .brand-gradient {
+    background-image: linear-gradient(135deg, rgba(var(--brand), 0.18), rgba(var(--brand2), 0.14));
+  }
+}

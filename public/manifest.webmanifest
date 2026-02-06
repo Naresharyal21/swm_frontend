@@ -1,0 +1,21 @@
+{
+  "name": "Smart Waste Management",
+  "short_name": "SmartWaste",
+  "description": "Smart Waste Management System \u2014 cleaner city, greener future.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B1013",
+  "theme_color": "#16A34A",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
