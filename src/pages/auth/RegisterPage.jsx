@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardHeader } from '../../components/ui/card'
 import { Input, Label } from '../../components/ui/input'
@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/button'
 import { useTheme } from '../../hooks/useTheme'
 import { useYupForm } from '../../hooks/useYupForm'
 import { useAuth } from '../../hooks/useAuth'
-import { Moon, Sun } from 'lucide-react'
+import { Moon, Sun, EyeOff, Eye } from 'lucide-react'
 import toast from 'react-hot-toast'
 import * as yup from 'yup'
 
@@ -24,7 +24,10 @@ export default function RegisterPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { theme, toggleTheme } = useTheme()
-  const { register } = useAuth() // ✅ remove logout
+  const { register } = useAuth()
+
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const fromPath = useMemo(() => {
     const stateFrom = location.state?.from?.pathname
@@ -43,21 +46,28 @@ export default function RegisterPage() {
       })
 
       if (res?.ok) {
-        // ✅ only ONE toast (RegisterPage owns it)
         toast.success('Account created. Please sign in.')
         navigate('/login', {
           replace: true,
           state: fromPath ? { from: { pathname: fromPath } } : undefined,
         })
-      } else {
-        toast.error(res?.message || 'Sign up failed.')
+        return { ok: true }
       }
+
+      // ❌ Do NOT toast here — useAuth/register already toasts error
+      return { ok: false }
     },
   })
 
   async function onFormSubmit(e) {
+    e.preventDefault()
     const res = await handleSubmit(e)
-    if (!res?.ok) toast.error('Please fix the highlighted fields.')
+    if (!res?.ok) {
+      // ✅ Only validation problems should show here
+      if (Object.keys(errors || {}).length) {
+        toast.error('Please fix the highlighted fields.')
+      }
+    }
   }
 
   return (
@@ -98,19 +108,51 @@ export default function RegisterPage() {
 
               <div>
                 <Label>Password</Label>
-                <Input className="mt-1" name="password" type="password" value={values.password} onChange={handleChange} />
+                <div className="relative mt-1">
+                  <Input
+                    className={`pr-12 ${errors.password ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={values.password}
+                    onChange={handleChange}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    aria-invalid={errors.password ? 'true' : 'false'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
                 {errors.password ? <p className="mt-1 text-xs text-red-600">{errors.password}</p> : null}
               </div>
 
               <div>
                 <Label>Confirm password</Label>
-                <Input
-                  className="mt-1"
-                  name="confirmPassword"
-                  type="password"
-                  value={values.confirmPassword}
-                  onChange={handleChange}
-                />
+                <div className="relative mt-1">
+                  <Input
+                    className={`pr-12 ${errors.confirmPassword ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+                    name="confirmPassword"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={values.confirmPassword}
+                    onChange={handleChange}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    aria-invalid={errors.confirmPassword ? 'true' : 'false'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+                    aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
                 {errors.confirmPassword ? <p className="mt-1 text-xs text-red-600">{errors.confirmPassword}</p> : null}
               </div>
 

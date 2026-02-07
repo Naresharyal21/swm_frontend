@@ -28,7 +28,8 @@
   --warning: 251 191 36;
 }
 
-html, body {
+html,
+body {
   height: 100%;
 }
 
@@ -75,4 +76,27 @@ body {
   .brand-gradient {
     background-image: linear-gradient(135deg, rgba(var(--brand), 0.18), rgba(var(--brand2), 0.14));
   }
+}
+
+/* -------------------------------------------------------
+   Leaflet: keep map UNDER sticky/fixed navbar on scroll
+   ------------------------------------------------------- */
+
+/* Make Leaflet never overlay the navbar */
+.leaflet-container {
+  position: relative;
+  z-index: 0 !important;
+}
+
+/* Leaflet internal panes/controls often have high z-index */
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 0 !important;
+}
+
+/* Optional: popups/tooltips above tiles but still below navbar */
+.leaflet-popup,
+.leaflet-tooltip {
+  z-index: 10 !important;
 }

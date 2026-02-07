@@ -1,3 +1,4 @@
+// src/lib/api.js
 import axios from 'axios'
 import { authStorage } from './authStorage'
 
@@ -56,15 +57,29 @@ api.interceptors.response.use(
     if (!original) return Promise.reject(error)
 
     const url = String(original?.url || '')
-    const isAuthEndpoint = url.includes('/auth/')
 
-    // ✅ role removed / permission denied => logout immediately
-    if (status === 403 && !isAuthEndpoint) {
+    // ✅ Auth endpoints where 401 is normal (wrong password, bad OTP, etc.)
+    const isLoginOrReset =
+      url.includes('/auth/login') ||
+      url.includes('/auth/register') ||
+      url.includes('/auth/refresh') ||
+      url.includes('/auth/forgot-password') ||
+      url.includes('/auth/verify-otp') ||
+      url.includes('/auth/reset-password')
+
+    // ✅ role removed / permission denied => logout immediately (not for auth endpoints)
+    if (status === 403 && !url.includes('/auth/')) {
       forceLogout('403_forbidden')
       return Promise.reject(error)
     }
 
-    // ✅ refresh only for 401
+    // ✅ If 401 happened on login/reset endpoints -> DO NOT refresh, DO NOT logout
+    // This fixes your "toast disappears in fraction of second" on wrong password.
+    if (status === 401 && isLoginOrReset) {
+      return Promise.reject(error)
+    }
+
+    // ✅ refresh only for 401 on protected endpoints
     if (status !== 401 || original.__isRetryRequest) {
       return Promise.reject(error)
     }
@@ -72,6 +87,11 @@ api.interceptors.response.use(
     original.__isRetryRequest = true
 
     try {
+      // If there is no refresh token, don't force logout here — just reject.
+      // (Avoid killing UI/toasts during login flows.)
+      const rt = authStorage.getRefreshToken()
+      if (!rt) return Promise.reject(error)
+
       if (!refreshPromise) {
         refreshPromise = tryRefresh().finally(() => {
           refreshPromise = null

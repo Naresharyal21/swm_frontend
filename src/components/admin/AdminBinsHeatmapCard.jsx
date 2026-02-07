@@ -1,6 +1,7 @@
 import React from "react";
 import toast from "react-hot-toast";
-import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 
 import HeatmapLayer from "../maps/HeatmapLayer";
 import { Card, CardContent, CardHeader } from "../ui/card";
@@ -26,13 +27,16 @@ function intensityForBin(b) {
 export default function AdminBinsHeatmapCard() {
   const [bins, setBins] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [isFullscreen, setIsFullscreen] = React.useState(false);
+
+  // Keep a handle to the map instance so we can invalidateSize on toggle
+  const mapRef = React.useRef(null);
 
   const load = async () => {
     try {
       setLoading(true);
-      const res = await sdk.admin.listBins({ limit: 500 }); // params optional
-      const items = res?.items || [];
-      setBins(items);
+      const res = await sdk.admin.listBins({ limit: 500 });
+      setBins(res?.items || []);
     } catch (e) {
       toast.error(e?.response?.data?.message || e?.message || "Failed to load bins");
     } finally {
@@ -44,64 +48,128 @@ export default function AdminBinsHeatmapCard() {
     load();
   }, []);
 
-  const points = bins
-    .map((b) => {
-      const ll = geoToLatLng(b.location);
-      if (!ll) return null;
-      return [ll.lat, ll.lng, intensityForBin(b)];
-    })
-    .filter(Boolean);
+  // Prevent background scroll while fullscreen is open
+  React.useEffect(() => {
+    if (!isFullscreen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isFullscreen]);
 
-  const center = points.length ? [points[0][0], points[0][1]] : [27.7172, 85.324];
+  // After layout changes, tell Leaflet to recalc size
+  React.useEffect(() => {
+    const t = setTimeout(() => {
+      mapRef.current?.invalidateSize?.();
+    }, 80);
+    return () => clearTimeout(t);
+  }, [isFullscreen]);
+
+  const points = React.useMemo(() => {
+    return bins
+      .map((b) => {
+        const ll = geoToLatLng(b.location);
+        if (!ll) return null;
+        return [ll.lat, ll.lng, intensityForBin(b)];
+      })
+      .filter(Boolean);
+  }, [bins]);
+
+  const center = React.useMemo(() => {
+    return points.length ? [points[0][0], points[0][1]] : [27.7172, 85.324];
+  }, [points]);
+
+  const MapBlock = ({ heightClass }) => (
+    <div
+      className={`relative z-0 rounded-2xl overflow-hidden border border-[rgb(var(--border))] w-full ${heightClass}`}
+    >
+      <MapContainer
+        center={center}
+        zoom={13}
+        style={{ height: "100%", width: "100%" }}
+        whenCreated={(m) => {
+          mapRef.current = m;
+        }}
+      >
+        <TileLayer
+          attribution="&copy; OpenStreetMap"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <HeatmapLayer points={points} options={{ radius: 28, blur: 18, maxZoom: 16 }} />
+      </MapContainer>
+    </div>
+  );
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <div className="text-base font-semibold">Bin Heatmap</div>
-          <div className="text-sm text-muted">
-            Hotter = higher fill%, offline bins, or low battery.
+    <>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <div className="text-base font-semibold">Bin Heatmap</div>
+            <div className="text-sm text-muted">
+              Hotter = higher fill%, offline bins, or low battery.
+            </div>
           </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsFullscreen(true)}
+              disabled={loading}
+            >
+              Fullscreen
+            </Button>
+
+            <Button variant="secondary" onClick={load} disabled={loading}>
+              {loading ? "Loading…" : "Refresh"}
+            </Button>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          {/* Normal view height */}
+          <MapBlock heightClass="h-[85vh]" />
+        </CardContent>
+      </Card>
+
+      {/* Fullscreen overlay */}
+      {isFullscreen && (
+        <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm">
+          {/* Keep it below navbar if navbar is z-50 */}
+          <div className="h-full w-full p-3 sm:p-4">
+            <div className="h-full w-full rounded-2xl overflow-hidden bg-white dark:bg-gray-900 border border-[rgb(var(--border))]">
+              <div className="flex items-center justify-between p-3 border-b border-[rgb(var(--border))]">
+                <div className="font-semibold">Bin Heatmap (Fullscreen)</div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={load}
+                    disabled={loading}
+                  >
+                    {loading ? "Loading…" : "Refresh"}
+                  </Button>
+                  <Button variant="outline" onClick={() => setIsFullscreen(false)}>
+                    Exit
+                  </Button>
+                </div>
+              </div>
+
+              {/* Full viewport map inside overlay */}
+              <div className="h-[calc(100%-52px)]">
+                <MapBlock heightClass="h-full" />
+              </div>
+            </div>
+          </div>
+
+          {/* click outside to close (optional) */}
+          <button
+            aria-label="Close fullscreen"
+            className="absolute inset-0 -z-10"
+            onClick={() => setIsFullscreen(false)}
+          />
         </div>
-        <Button variant="secondary" onClick={load} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
-        </Button>
-      </CardHeader>
-
-      <CardContent>
-        {/* <div className="rounded-2xl overflow-hidden border border-[rgb(var(--border))] h-[420px]"> */}
-        <div className="rounded-2xl overflow-hidden border border-[rgb(var(--border))] h-[85vh] w-full">
-    
-          <MapContainer center={center} zoom={13} style={{ height: "100%", width: "100%" }}>
-            <TileLayer
-              attribution="&copy; OpenStreetMap"
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-
-            <HeatmapLayer points={points} options={{ radius: 28, blur: 18, maxZoom: 16 }} />
-
-            {/* Optional click markers */}
-            {/* {bins.map((b) => {
-              const ll = geoToLatLng(b.location);
-              if (!ll) return null;
-              return (
-                <CircleMarker key={b._id} center={[ll.lat, ll.lng]} radius={6}>
-                  <Popup>
-                    <div className="text-sm space-y-1">
-                      <div className="font-semibold">{b.binId || b._id}</div>
-                      <div>Fill: {b.fillPercent ?? 0}%</div>
-                      <div>Battery: {b.batteryPercent ?? "—"}% ({b.batteryState || "—"})</div>
-                      <div>Offline: {b.isOffline ? "Yes" : "No"}</div>
-                      <div>Status: {b.status || "—"}</div>
-                      <div className="text-xs text-muted">Household: {b.householdId}</div>
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              );
-            })} */}
-          </MapContainer>
-        </div>
-      </CardContent>
-    </Card>
+      )}
+    </>
   );
 }

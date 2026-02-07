@@ -1,141 +1,329 @@
-import React, { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import toast from 'react-hot-toast'
+import React, { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api, unwrap } from "../../lib/api";
 
-import { PageHeader } from '../../components/layout/PageHeader'
-import { Card, CardContent, CardHeader } from '../../components/ui/card'
-import { Button } from '../../components/ui/button'
-import { Select } from '../../components/ui/select'
-import { Modal } from '../../components/ui/modal'
-import { Table, THead, TH, TR, TD } from '../../components/ui/table'
-import { EmptyState } from '../../components/ui/empty'
-import { Badge } from '../../components/ui/badge'
-import { sdk } from '../../lib/sdk'
-import { formatMoney, pickErrorMessage } from '../../lib/utils'
+// OPTIONAL: PDF download (frontend-only). If you don't want PDF, remove these 2 imports + PDF code below.
+// npm i jspdf jspdf-autotable
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
-function invVariant(status) {
-  if (status === 'PAID') return 'success'
-  if (status === 'ISSUED') return 'warning'
-  return 'default'
+// -------------------------
+// Local UI helpers
+// -------------------------
+function PageHeader({ title, subtitle }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{title}</h1>
+      {subtitle ? <div style={{ marginTop: 4, opacity: 0.7 }}>{subtitle}</div> : null}
+    </div>
+  );
+}
+
+function Message({ type = "info", text }) {
+  const border =
+    type === "error" ? "1px solid #ffb4b4" : type === "success" ? "1px solid #b5f5c2" : "1px solid #cbd5e1";
+  const bg = type === "error" ? "#fff5f5" : type === "success" ? "#f0fff4" : "#f8fafc";
+  return <div style={{ border, background: bg, padding: 12, borderRadius: 10 }}>{text}</div>;
+}
+
+// -------------------------
+// Mongo / populated helpers
+// -------------------------
+function unwrapOid(v) {
+  if (!v) return null;
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && v.$oid) return v.$oid;
+  return null;
+}
+
+function unwrapDate(v) {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === "string" || typeof v === "number") return v;
+
+  if (typeof v === "object" && v.$date != null) {
+    const d = v.$date;
+    if (typeof d === "string" || typeof d === "number") return d;
+    if (typeof d === "object" && d.$numberLong) return Number(d.$numberLong);
+  }
+  return null;
+}
+
+function toJsDate(value) {
+  const v = unwrapDate(value);
+  if (!v) return null;
+
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+
+  if (typeof v === "number") {
+    const ms = v < 1e12 ? v * 1000 : v;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  if (typeof v === "string") {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  return null;
+}
+
+function fmtAdDateTime(adValue) {
+  const d = toJsDate(adValue);
+  return d ? d.toLocaleString() : "—";
+}
+
+function moneyNPR(value) {
+  const n = Number(value);
+  if (Number.isNaN(n)) return "—";
+  return new Intl.NumberFormat("en-NP", { style: "currency", currency: "NPR" }).format(n);
+}
+
+function getUserName(inv) {
+  // when populated: userId is object {name/fullName/firstName/lastName/email}
+  const u = inv?.userId;
+  if (u && typeof u === "object") {
+    return (
+      u.fullName ||
+      u.name ||
+      [u.firstName, u.lastName].filter(Boolean).join(" ") ||
+      u.email ||
+      unwrapOid(u._id) ||
+      "—"
+    );
+  }
+  // not populated (string ObjectId)
+  return unwrapOid(inv?.userId) || "—";
+}
+
+function getPlanText(inv) {
+  const p = inv?.planId;
+  if (p && typeof p === "object") {
+    return p.name || unwrapOid(p._id) || "—";
+  }
+  return unwrapOid(inv?.planId) || "—";
+}
+
+// -------------------------
+// API call
+// -------------------------
+async function fetchInvoices() {
+  // PaymentTransaction source
+  const res = await api.get("/citizen/transactions");
+  const data = unwrap(res);
+
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (data && typeof data === "object") return [data];
+  return [];
+}
+
+// -------------------------
+// Frontend PDF generator (FIXED for populated objects)
+// -------------------------
+function downloadInvoicePdf(inv) {
+  const doc = new jsPDF();
+
+  const invoiceId = inv?.transactionUuid || unwrapOid(inv?._id) || "invoice";
+  const createdText = fmtAdDateTime(inv?.createdAt || inv?.updatedAt || inv?.date);
+
+  const userText = getUserName(inv);
+  const planText = getPlanText(inv);
+
+  doc.setFontSize(16);
+  doc.text("Invoice", 14, 16);
+
+  doc.setFontSize(11);
+  doc.text(`Invoice ID: ${invoiceId}`, 14, 26);
+  doc.text(`Date (AD): ${createdText}`, 14, 33);
+  doc.text(`Provider: ${inv?.provider || "—"}`, 14, 40);
+  doc.text(`Status: ${inv?.status || "—"}`, 14, 47);
+
+  autoTable(doc, {
+    startY: 55,
+    head: [["Field", "Value"]],
+    body: [
+      ["Transaction UUID", inv?.transactionUuid || "—"],
+      ["User", userText],
+      ["Plan", planText],
+      ["Amount", `${inv?.amount ?? "—"} ${inv?.currency || "NPR"}`],
+      ["Product Code", inv?.productCode || "—"],
+      ["Provider Ref ID", inv?.providerRefId || "—"],
+      ["Created At", createdText],
+    ],
+    styles: { fontSize: 10 },
+    theme: "grid",
+  });
+
+  const endY = doc.lastAutoTable?.finalY || 120;
+  doc.setFontSize(9);
+  doc.text("System-generated invoice (frontend PDF).", 14, endY + 10);
+
+  doc.save(`invoice-${invoiceId}.pdf`);
 }
 
 export default function InvoicesPage() {
-  const qc = useQueryClient()
-  const q = useQuery({ queryKey: ['citizen_invoices'], queryFn: () => sdk.citizen.listInvoices() })
-  const items = q.data?.items || []
-
-  const [open, setOpen] = useState(false)
-  const [active, setActive] = useState(null)
-  const [provider, setProvider] = useState('MOCK')
-  const [intent, setIntent] = useState(null)
-
-  const pay = useMutation({
-    mutationFn: () => sdk.citizen.payInvoice(active._id || active.id, { provider }),
-    onSuccess: (res) => {
-      setIntent(res?.intent || res)
-      toast.success('Payment intent created')
-      qc.invalidateQueries({ queryKey: ['citizen_invoices'] })
+  const q = useQuery({
+    queryKey: ["citizen", "transactions"],
+    queryFn: fetchInvoices,
+    staleTime: 30_000,
+    retry: (count, err) => {
+      const status = err?.response?.status;
+      if (status === 401 || status === 403) return false;
+      return count < 2;
     },
-    onError: (e) => toast.error(pickErrorMessage(e))
-  })
+  });
 
-  function openPay(inv) {
-    setActive(inv)
-    setIntent(null)
-    setProvider('MOCK')
-    setOpen(true)
-  }
+  const invoices = Array.isArray(q.data) ? q.data : [];
+
+  // Group by AD Year-Month only
+  const groups = useMemo(() => {
+    const map = new Map();
+
+    for (const inv of invoices) {
+      const adVal = inv?.createdAt || inv?.updatedAt || inv?.date || inv?.invoiceDate;
+      const d = toJsDate(adVal);
+
+      const key = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` : "Unknown";
+
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(inv);
+    }
+
+    const entries = Array.from(map.entries());
+    entries.sort((a, b) => {
+      if (a[0] === "Unknown") return 1;
+      if (b[0] === "Unknown") return -1;
+      return b[0].localeCompare(a[0]); // newest month first
+    });
+
+    return entries;
+  }, [invoices]);
+
+  const errStatus = q.error?.response?.status;
+  const errMsg = q.error?.response?.data?.message || q.error?.message || "Failed to load invoices";
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="Invoices" subtitle="View monthly invoices and initiate payment." />
+    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <PageHeader title="Invoices" subtitle="Payment transactions (AD dates only)" />
 
-      <Card>
-        <CardHeader>
-          <div className="text-base font-semibold">Payment providers</div>
-          <div className="text-sm text-muted">Backend supports MOCK (default) and optional Khalti depending on configuration.</div>
-        </CardHeader>
-        <CardContent className="text-xs text-muted">
-          Invoice generation is done by Ops → Generate Billing.
-        </CardContent>
-      </Card>
+      {q.isLoading && <Message type="info" text="Loading invoices..." />}
 
-      {q.isLoading ? (
-        <div className="text-sm text-muted">Loading invoices...</div>
-      ) : items.length === 0 ? (
-        <EmptyState title="No invoices" description="Invoices will appear after monthly generation by supervisor/admin." />
-      ) : (
-        <Table>
-          <THead>
-            <tr>
-              <TH>Month</TH>
-              <TH>Status</TH>
-              <TH>Total</TH>
-              <TH>Credits applied</TH>
-              <TH>Amount due</TH>
-              <TH className="text-right">Action</TH>
-            </tr>
-          </THead>
-          <tbody>
-            {items.map((inv) => (
-              <TR key={inv._id || inv.id}>
-                <TD className="font-medium">{inv.month}</TD>
-                <TD><Badge variant={invVariant(inv.status)}>{inv.status}</Badge></TD>
-                <TD>Rs. {formatMoney(inv.total)}</TD>
-                <TD>Rs. {formatMoney(inv.creditsApplied)}</TD>
-                <TD className="font-semibold">Rs. {formatMoney(inv.amountDue)}</TD>
-                <TD className="text-right">
-                  {inv.status === 'PAID' || Number(inv.amountDue || 0) <= 0 ? (
-                    <span className="text-xs text-muted">—</span>
-                  ) : (
-                    <Button variant="outline" onClick={() => openPay(inv)}>Pay</Button>
-                  )}
-                </TD>
-              </TR>
-            ))}
-          </tbody>
-        </Table>
+      {q.isError && (
+        <Message
+          type="error"
+          text={
+            errStatus === 401
+              ? "401 Unauthorized. Please log in again as Citizen."
+              : errStatus === 403
+              ? "403 Forbidden. Your role does not have permission to view invoices."
+              : errMsg
+          }
+        />
       )}
 
-      <Modal
-        open={open}
-        onOpenChange={setOpen}
-        title="Pay invoice"
-        description="Creates a payment intent. Completion depends on configured provider."
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setOpen(false)}>Close</Button>
-            <Button disabled={pay.isPending} onClick={() => pay.mutate()}>
-              {pay.isPending ? 'Creating...' : 'Create intent'}
-            </Button>
-          </div>
-        }
-      >
-        <div className="grid gap-4">
-          <div className="rounded-2xl border border-app bg-black/5 p-4 text-sm dark:bg-white/5">
-            <div className="font-semibold">Invoice: {active?._id || active?.id}</div>
-            <div className="mt-1 text-xs text-muted">Month: {active?.month}</div>
-            <div className="mt-2 text-sm">Amount due: <span className="font-semibold">Rs. {formatMoney(active?.amountDue)}</span></div>
-          </div>
+      {!q.isLoading && !q.isError && invoices.length === 0 && <Message type="info" text="No invoices found." />}
 
-          <div>
-            <div className="text-xs font-medium text-muted">Provider</div>
-            <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
-              <option value="MOCK">MOCK</option>
-              <option value="KHALTI">KHALTI</option>
-            </Select>
-          </div>
+      {!q.isLoading && !q.isError && invoices.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {groups.map(([ym, items]) => (
+            <div
+              key={ym}
+              style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 12,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  padding: 12,
+                  borderBottom: "1px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  background: "#f8fafc",
+                }}
+              >
+                <div style={{ fontWeight: 800 }}>{ym === "Unknown" ? "Unknown period" : `AD ${ym}`}</div>
+                <div style={{ opacity: 0.7, fontSize: 13 }}>{items.length} record(s)</div>
+              </div>
 
-          {intent ? (
-            <div className="rounded-2xl border border-app bg-black/5 p-4 text-sm dark:bg-white/5">
-              <div className="font-semibold">Payment intent created</div>
-              <pre className="mt-2 max-h-64 overflow-auto text-xs text-muted">{JSON.stringify(intent, null, 2)}</pre>
+              <div style={{ padding: 12, overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+                      <th style={{ padding: "8px 8px 8px 0" }}>Transaction UUID</th>
+                      <th style={{ padding: "8px 8px" }}>User</th>
+                      <th style={{ padding: "8px 8px" }}>Plan</th>
+                      <th style={{ padding: "8px 8px" }}>Provider</th>
+                      <th style={{ padding: "8px 8px" }}>Created (AD)</th>
+                      <th style={{ padding: "8px 8px" }}>Amount</th>
+                      <th style={{ padding: "8px 8px" }}>Status</th>
+                      <th style={{ padding: "8px 8px" }}>PDF</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {items.map((inv, idx) => {
+                      const rowId = unwrapOid(inv?._id) || inv?.id || `${ym}-${idx}`;
+
+                      const txn = inv?.transactionUuid || unwrapOid(inv?._id) || "—";
+                      const provider = inv?.provider || "—";
+                      const createdAt = inv?.createdAt || inv?.updatedAt || inv?.date;
+
+                      const amount = inv?.amount ?? inv?.total ?? inv?.grandTotal ?? inv?.dueAmount;
+                      const currency = inv?.currency || "NPR";
+                      const status = inv?.status ?? inv?.paymentStatus ?? inv?.state ?? "—";
+
+                      const userName = getUserName(inv);
+                      const planName = getPlanText(inv);
+
+                      return (
+                        <tr key={rowId} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "10px 8px 10px 0", fontFamily: "monospace" }}>{txn}</td>
+                          <td style={{ padding: "10px 8px" }}>{userName}</td>
+                          <td style={{ padding: "10px 8px" }}>{planName}</td>
+                          <td style={{ padding: "10px 8px" }}>{provider}</td>
+                          <td style={{ padding: "10px 8px" }}>{fmtAdDateTime(createdAt)}</td>
+                          <td style={{ padding: "10px 8px" }}>
+                            {currency === "NPR" ? moneyNPR(amount) : `${amount ?? "—"} ${currency}`}
+                          </td>
+                          <td style={{ padding: "10px 8px" }}>
+                            <span style={{ padding: "2px 8px", border: "1px solid #e2e8f0", borderRadius: 999 }}>
+                              {status}
+                            </span>
+                          </td>
+                          <td style={{ padding: "10px 8px" }}>
+                            <button
+                              type="button"
+                              onClick={() => downloadInvoicePdf(inv)}
+                              style={{
+                                border: "1px solid #cbd5e1",
+                                background: "white",
+                                padding: "6px 10px",
+                                borderRadius: 10,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Download
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                <div style={{ marginTop: 10, opacity: 0.65, fontSize: 12 }}>
+                  See payment Date Before Payment.
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="text-xs text-muted">After creating the intent, complete payment according to the provider response.</div>
-          )}
+          ))}
         </div>
-      </Modal>
+      )}
     </div>
-  )
+  );
 }

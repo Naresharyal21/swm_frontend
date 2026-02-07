@@ -63,7 +63,7 @@ export function AuthProvider({ children }) {
           return { ok: true }
         } catch (e) {
           const msg = pickErrorMessage(e)
-          toast.error(msg)
+          
           return { ok: false, message: msg }
         }
       },
