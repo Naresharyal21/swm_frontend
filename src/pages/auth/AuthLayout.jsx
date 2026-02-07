@@ -8,8 +8,11 @@ export function AuthLayout() {
   const { isAuthed } = useAuth();
   const loc = useLocation();
 
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const effectiveTheme = resolvedTheme || theme;
+  const { resolvedTheme, setTheme } = useTheme();
+
+  // ✅ Fix hydration mismatch for theme UI
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
 
   if (isAuthed) {
     const to = loc.state?.from || "/app";
@@ -17,6 +20,7 @@ export function AuthLayout() {
   }
 
   const PANEL_MIN_H = "min-h-[560px]";
+  const isDark = mounted ? resolvedTheme === "dark" : false; // safe default before mount
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 grid place-items-center p-4 sm:p-8">
@@ -81,13 +85,15 @@ export function AuthLayout() {
                 {/* Theme toggle */}
                 <div className="flex justify-end">
                   <button
-                    className="inline-flex items-center gap-2 rounded-xl border border-transparent px-3 py-2 text-sm bg-white dark:bg-slate-950"
+                    className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm bg-white dark:bg-slate-950 hover:bg-black/5 dark:hover:bg-white/10 transition"
                     type="button"
-                    aria-label="Toggle theme"
-                    title="Toggle theme"
-                    onClick={() => setTheme(effectiveTheme === "dark" ? "light" : "dark")}
+                    aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                    title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                    onClick={() => setTheme(isDark ? "light" : "dark")}
+                    disabled={!mounted}
                   >
-                    {effectiveTheme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+                    {isDark ? <Sun size={18} /> : <Moon size={18} />}
+                    <span className="hidden sm:inline">{isDark ? "Light" : "Dark"}</span>
                   </button>
                 </div>
 
