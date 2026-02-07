@@ -54,6 +54,7 @@ function normalizeStatus(value) {
  * Status chip colors:
  * - completed/success/paid: green
  * - pending/processing: amber/yellow
+ * - initiated: red (as requested)
  * - failed/cancelled/rejected: red
  * - else: neutral
  */
@@ -69,7 +70,16 @@ function statusChipStyle(statusRaw) {
     s === "settled";
 
   const isPending = s === "pending" || s === "processing" || s === "in_progress" || s === "awaiting";
-  const isFailed = s === "failed" || s === "cancelled" || s === "canceled" || s === "rejected" || s === "error";
+
+  const isFailed =
+    s === "failed" ||
+    s === "cancelled" ||
+    s === "canceled" ||
+    s === "rejected" ||
+    s === "error" ||
+    s === "initiated" ||
+    s === "initiate" ||
+    s === "initiating";
 
   if (isCompleted) {
     return {
@@ -78,6 +88,7 @@ function statusChipStyle(statusRaw) {
       color: "rgb(22, 163, 74)",
     };
   }
+
   if (isPending) {
     return {
       background: "rgba(245, 158, 11, 0.14)",
@@ -85,10 +96,12 @@ function statusChipStyle(statusRaw) {
       color: "rgb(217, 119, 6)",
     };
   }
+
   if (isFailed) {
+    const isInitiated = s === "initiated" || s === "initiate" || s === "initiating";
     return {
-      background: "rgba(var(--danger), 0.12)",
-      border: "1px solid rgba(var(--danger), 0.40)",
+      background: isInitiated ? "rgba(var(--danger), 0.18)" : "rgba(var(--danger), 0.12)",
+      border: "1px solid rgba(var(--danger), 0.45)",
       color: "rgb(var(--danger))",
     };
   }
@@ -104,9 +117,7 @@ function statusChipStyle(statusRaw) {
 function prettyStatus(value) {
   const raw = String(value ?? "—");
   if (!raw || raw === "—") return "—";
-  // keep original if already nice
   if (raw.includes(" ")) return raw;
-  // "in_progress" -> "In Progress"
   return raw
     .replace(/_/g, " ")
     .replace(/-/g, " ")
@@ -205,7 +216,7 @@ async function fetchInvoices() {
 }
 
 // -------------------------
-// Frontend PDF generator (FIXED for populated objects)
+// Frontend PDF generator
 // -------------------------
 function downloadInvoicePdf(inv) {
   const doc = new jsPDF();
