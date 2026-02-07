@@ -100,3 +100,24 @@ body {
 .leaflet-tooltip {
   z-index: 10 !important;
 }
+/* Emergency border pulse (gentle blinking) */
+@keyframes emergencyBorderPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.0);
+    border-color: rgba(239, 68, 68, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.85);
+  }
+}
+
+.emergency-blink {
+  animation: emergencyBorderPulse 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .emergency-blink {
+    animation: none !important;
+  }
+}

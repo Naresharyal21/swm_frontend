@@ -56,9 +56,7 @@ function getNav(role) {
         { label: "Membership Plans", to: "/app/admin/membership-plans", icon: Sparkles },
         { label: "Reward Rates", to: "/app/admin/reward-rates", icon: BadgeDollarSign },
       ]),
-      group("IoT", [
-        { label: "Telemetry", to: "/app/admin/telemetry", icon: Radar },
-      ]),
+      group("IoT", [{ label: "Telemetry", to: "/app/admin/telemetry", icon: Radar }]),
       group("Operations", [
         { label: "Cases", to: "/app/ops/cases", icon: ClipboardList },
         { label: "Tasks", to: "/app/ops/tasks", icon: ClipboardList },
@@ -96,6 +94,7 @@ function getNav(role) {
     ];
   }
 
+  // CITIZEN (default)
   return [
     ...base,
     group("Citizen", [
@@ -112,6 +111,9 @@ function getNav(role) {
       { label: "Reward Claim", to: "/app/citizen/reward-claim", icon: BadgeDollarSign },
       { label: "Recyclables", to: "/app/citizen/recyclables", icon: Leaf },
       { label: "Notifications", to: "/app/citizen/notifications", icon: Bell },
+
+      // ✅ NEW
+      { label: "Contact & Feedback", to: "/app/citizen/contact-feedback", icon: FileText },
     ]),
   ];
 }
@@ -251,8 +253,7 @@ export function AppShell() {
   useEffect(() => {
     function onKeyDown(e) {
       const tag = (document.activeElement?.tagName || "").toLowerCase();
-      const typing =
-        tag === "input" || tag === "textarea" || document.activeElement?.isContentEditable;
+      const typing = tag === "input" || tag === "textarea" || document.activeElement?.isContentEditable;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -295,10 +296,7 @@ export function AppShell() {
 
         <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
           <Dialog.Portal>
-            <Dialog.Overlay
-              className="fixed inset-0 bg-black/40 lg:hidden"
-              onClick={() => setMobileOpen(false)}
-            />
+            <Dialog.Overlay className="fixed inset-0 bg-black/40 lg:hidden" onClick={() => setMobileOpen(false)} />
             <Dialog.Content className="fixed left-0 top-0 h-full w-[85vw] max-w-xs border-r border-app bg-[rgb(var(--card))] shadow-soft lg:hidden">
               <SideNav role={role} onNavigate={() => setMobileOpen(false)} />
             </Dialog.Content>
@@ -320,9 +318,7 @@ export function AppShell() {
 
                 <div className="hidden sm:block">
                   <div className="text-sm font-semibold leading-tight">Welcome back</div>
-                  <div className="text-xs text-muted leading-tight">
-                    Keep the city clean & sustainable
-                  </div>
+                  <div className="text-xs text-muted leading-tight">Keep the city clean & sustainable</div>
                 </div>
               </div>
 
@@ -410,9 +406,7 @@ export function AppShell() {
                               }}
                               className={cn(
                                 "w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left text-sm transition",
-                                active
-                                  ? "bg-black/5 dark:bg-white/10"
-                                  : "hover:bg-black/5 dark:hover:bg-white/10"
+                                active ? "bg-black/5 dark:bg-white/10" : "hover:bg-black/5 dark:hover:bg-white/10"
                               )}
                             >
                               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-black/5 dark:bg-white/5">

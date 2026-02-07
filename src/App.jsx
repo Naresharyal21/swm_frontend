@@ -54,6 +54,8 @@ import NotificationsPage from './pages/citizen/NotificationsPage'
 import HouseholdSettingsPage from './pages/citizen/HouseholdSettingsPage'
 import CollectionSchedulePage from './pages/citizen/CollectionSchedulePage'
 import MissedPickupPage from './pages/citizen/MissedPickupPage'
+import ContactFeedbackPage from './pages/citizen/ContactFeedbackPage'
+
 
 // Billing redirect pages (public routes)
 import BillingSuccessPage from './pages/citizen/BillingSuccessPage'
@@ -124,6 +126,8 @@ export default function App() {
             <Route path="citizen/reward-claim" element={<RewardClaimPage />} />
             <Route path="citizen/recyclables" element={<RecyclablesPage />} />
             <Route path="citizen/notifications" element={<NotificationsPage />} />
+            <Route path="citizen/contact-feedback" element={<ContactFeedbackPage />} />
+
           </Route>
 
           <Route path="*" element={<NotFoundPage />} />
