@@ -13,17 +13,105 @@ import autoTable from "jspdf-autotable";
 function PageHeader({ title, subtitle }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{title}</h1>
-      {subtitle ? <div style={{ marginTop: 4, opacity: 0.7 }}>{subtitle}</div> : null}
+      <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "rgb(var(--fg))" }}>{title}</h1>
+      {subtitle ? (
+        <div style={{ marginTop: 4, opacity: 0.75, color: "rgb(var(--muted))" }}>{subtitle}</div>
+      ) : null}
     </div>
   );
 }
 
 function Message({ type = "info", text }) {
   const border =
-    type === "error" ? "1px solid #ffb4b4" : type === "success" ? "1px solid #b5f5c2" : "1px solid #cbd5e1";
-  const bg = type === "error" ? "#fff5f5" : type === "success" ? "#f0fff4" : "#f8fafc";
-  return <div style={{ border, background: bg, padding: 12, borderRadius: 10 }}>{text}</div>;
+    type === "error"
+      ? `1px solid rgba(var(--danger), 0.45)`
+      : type === "success"
+      ? "1px solid rgba(34, 197, 94, 0.35)"
+      : "1px solid rgb(var(--border))";
+
+  const bg =
+    type === "error"
+      ? "rgba(var(--danger), 0.10)"
+      : type === "success"
+      ? "rgba(34, 197, 94, 0.10)"
+      : "rgba(var(--border), 0.20)";
+
+  return (
+    <div style={{ border, background: bg, padding: 12, borderRadius: 10, color: "rgb(var(--fg))" }}>
+      {text}
+    </div>
+  );
+}
+
+function normalizeStatus(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
+
+/**
+ * Status chip colors:
+ * - completed/success/paid: green
+ * - pending/processing: amber/yellow
+ * - failed/cancelled/rejected: red
+ * - else: neutral
+ */
+function statusChipStyle(statusRaw) {
+  const s = normalizeStatus(statusRaw);
+
+  const isCompleted =
+    s === "completed" ||
+    s === "complete" ||
+    s === "success" ||
+    s === "succeeded" ||
+    s === "paid" ||
+    s === "settled";
+
+  const isPending = s === "pending" || s === "processing" || s === "in_progress" || s === "awaiting";
+  const isFailed = s === "failed" || s === "cancelled" || s === "canceled" || s === "rejected" || s === "error";
+
+  if (isCompleted) {
+    return {
+      background: "rgba(34, 197, 94, 0.14)",
+      border: "1px solid rgba(34, 197, 94, 0.40)",
+      color: "rgb(22, 163, 74)",
+    };
+  }
+  if (isPending) {
+    return {
+      background: "rgba(245, 158, 11, 0.14)",
+      border: "1px solid rgba(245, 158, 11, 0.40)",
+      color: "rgb(217, 119, 6)",
+    };
+  }
+  if (isFailed) {
+    return {
+      background: "rgba(var(--danger), 0.12)",
+      border: "1px solid rgba(var(--danger), 0.40)",
+      color: "rgb(var(--danger))",
+    };
+  }
+
+  return {
+    background: "rgba(var(--border), 0.18)",
+    border: "1px solid rgb(var(--border))",
+    color: "rgb(var(--fg))",
+    opacity: 0.9,
+  };
+}
+
+function prettyStatus(value) {
+  const raw = String(value ?? "—");
+  if (!raw || raw === "—") return "—";
+  // keep original if already nice
+  if (raw.includes(" ")) return raw;
+  // "in_progress" -> "In Progress"
+  return raw
+    .replace(/_/g, " ")
+    .replace(/-/g, " ")
+    .trim()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 // -------------------------
@@ -81,7 +169,6 @@ function moneyNPR(value) {
 }
 
 function getUserName(inv) {
-  // when populated: userId is object {name/fullName/firstName/lastName/email}
   const u = inv?.userId;
   if (u && typeof u === "object") {
     return (
@@ -93,7 +180,6 @@ function getUserName(inv) {
       "—"
     );
   }
-  // not populated (string ObjectId)
   return unwrapOid(inv?.userId) || "—";
 }
 
@@ -109,7 +195,6 @@ function getPlanText(inv) {
 // API call
 // -------------------------
 async function fetchInvoices() {
-  // PaymentTransaction source
   const res = await api.get("/citizen/transactions");
   const data = unwrap(res);
 
@@ -138,7 +223,7 @@ function downloadInvoicePdf(inv) {
   doc.text(`Invoice ID: ${invoiceId}`, 14, 26);
   doc.text(`Date (AD): ${createdText}`, 14, 33);
   doc.text(`Provider: ${inv?.provider || "—"}`, 14, 40);
-  doc.text(`Status: ${inv?.status || "—"}`, 14, 47);
+  doc.text(`Status: ${prettyStatus(inv?.status || "—")}`, 14, 47);
 
   autoTable(doc, {
     startY: 55,
@@ -205,7 +290,7 @@ export default function InvoicesPage() {
   const errMsg = q.error?.response?.data?.message || q.error?.message || "Failed to load invoices";
 
   return (
-    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, color: "rgb(var(--fg))" }}>
       <PageHeader title="Invoices" subtitle="Payment transactions (AD dates only)" />
 
       {q.isLoading && <Message type="info" text="Loading invoices..." />}
@@ -231,29 +316,33 @@ export default function InvoicesPage() {
             <div
               key={ym}
               style={{
-                border: "1px solid #e2e8f0",
+                border: "1px solid rgb(var(--border))",
                 borderRadius: 12,
                 overflow: "hidden",
+                background: "rgb(var(--card))",
               }}
             >
               <div
                 style={{
                   padding: 12,
-                  borderBottom: "1px solid #e2e8f0",
+                  borderBottom: "1px solid rgb(var(--border))",
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  background: "#f8fafc",
+                  background: "rgba(var(--border), 0.18)",
+                  color: "rgb(var(--fg))",
                 }}
               >
                 <div style={{ fontWeight: 800 }}>{ym === "Unknown" ? "Unknown period" : `AD ${ym}`}</div>
-                <div style={{ opacity: 0.7, fontSize: 13 }}>{items.length} record(s)</div>
+                <div style={{ opacity: 0.75, fontSize: 13, color: "rgb(var(--muted))" }}>
+                  {items.length} record(s)
+                </div>
               </div>
 
               <div style={{ padding: 12, overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, color: "rgb(var(--fg))" }}>
                   <thead>
-                    <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+                    <tr style={{ textAlign: "left", borderBottom: "1px solid rgb(var(--border))" }}>
                       <th style={{ padding: "8px 8px 8px 0" }}>Transaction UUID</th>
                       <th style={{ padding: "8px 8px" }}>User</th>
                       <th style={{ padding: "8px 8px" }}>Plan</th>
@@ -280,8 +369,10 @@ export default function InvoicesPage() {
                       const userName = getUserName(inv);
                       const planName = getPlanText(inv);
 
+                      const chip = statusChipStyle(status);
+
                       return (
-                        <tr key={rowId} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <tr key={rowId} style={{ borderBottom: "1px solid rgba(var(--border), 0.45)" }}>
                           <td style={{ padding: "10px 8px 10px 0", fontFamily: "monospace" }}>{txn}</td>
                           <td style={{ padding: "10px 8px" }}>{userName}</td>
                           <td style={{ padding: "10px 8px" }}>{planName}</td>
@@ -291,8 +382,18 @@ export default function InvoicesPage() {
                             {currency === "NPR" ? moneyNPR(amount) : `${amount ?? "—"} ${currency}`}
                           </td>
                           <td style={{ padding: "10px 8px" }}>
-                            <span style={{ padding: "2px 8px", border: "1px solid #e2e8f0", borderRadius: 999 }}>
-                              {status}
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                padding: "3px 10px",
+                                borderRadius: 999,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                ...chip,
+                              }}
+                            >
+                              {prettyStatus(status)}
                             </span>
                           </td>
                           <td style={{ padding: "10px 8px" }}>
@@ -300,8 +401,9 @@ export default function InvoicesPage() {
                               type="button"
                               onClick={() => downloadInvoicePdf(inv)}
                               style={{
-                                border: "1px solid #cbd5e1",
-                                background: "white",
+                                border: "1px solid rgb(var(--border))",
+                                background: "rgb(var(--card))",
+                                color: "rgb(var(--fg))",
                                 padding: "6px 10px",
                                 borderRadius: 10,
                                 cursor: "pointer",
@@ -316,7 +418,7 @@ export default function InvoicesPage() {
                   </tbody>
                 </table>
 
-                <div style={{ marginTop: 10, opacity: 0.65, fontSize: 12 }}>
+                <div style={{ marginTop: 10, opacity: 0.75, fontSize: 12, color: "rgb(var(--muted))" }}>
                   See payment Date Before Payment.
                 </div>
               </div>
