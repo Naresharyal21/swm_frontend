@@ -31,8 +31,12 @@ export default function VehiclesPage() {
 
   const crewById = useMemo(() => Object.fromEntries(crew.map((u) => [String(u._id || u.id), u])), [crew])
 
+  // modal state
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({
+  const [editOpen, setEditOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+
+  const EMPTY_FORM = {
     code: '',
     vehicleType: VEHICLE_TYPES.TRUCK,
     capacityKg: '',
@@ -40,7 +44,9 @@ export default function VehiclesPage() {
     shiftStart: '08:00',
     shiftEnd: '16:00',
     crewUserIds: []
-  })
+  }
+
+  const [form, setForm] = useState(EMPTY_FORM)
 
   function set(k, v) {
     setForm((p) => ({ ...p, [k]: v }))
@@ -55,31 +61,87 @@ export default function VehiclesPage() {
     })
   }
 
+  function toPayload(f) {
+    return {
+      code: f.code?.trim(),
+      vehicleType: f.vehicleType,
+      capacityKg: f.capacityKg === '' ? null : Number(f.capacityKg),
+      isActive: !!f.isActive,
+      shiftStart: f.shiftStart || '08:00',
+      shiftEnd: f.shiftEnd || '16:00',
+      crewUserIds: f.crewUserIds || []
+    }
+  }
+
+  // -----------------------
+  // create
+  // -----------------------
   const create = useMutation({
     mutationFn: async () => {
       if (!form.code.trim()) throw new Error('Vehicle code is required')
-      const payload = {
-        code: form.code.trim(),
-        vehicleType: form.vehicleType,
-        capacityKg: form.capacityKg === '' ? null : Number(form.capacityKg),
-        isActive: !!form.isActive,
-        shiftStart: form.shiftStart || '08:00',
-        shiftEnd: form.shiftEnd || '16:00',
-        crewUserIds: form.crewUserIds || []
-      }
-      return sdk.admin.createVehicle(payload)
+      return sdk.admin.createVehicle(toPayload(form))
     },
     onSuccess: () => {
       toast.success('Vehicle created')
       setOpen(false)
-      setForm({ code: '', vehicleType: VEHICLE_TYPES.TRUCK, capacityKg: '', isActive: true, shiftStart: '08:00', shiftEnd: '16:00', crewUserIds: [] })
+      setForm(EMPTY_FORM)
+      qc.invalidateQueries({ queryKey: ['admin_vehicles'] })
+    },
+    onError: (e) => toast.error(pickErrorMessage(e))
+  })
+
+  // -----------------------
+  // update
+  // -----------------------
+  const update = useMutation({
+    mutationFn: async () => {
+      const id = editing?._id || editing?.id
+      if (!id) throw new Error('Missing vehicle id')
+      if (!form.code.trim()) throw new Error('Vehicle code is required')
+      return sdk.admin.updateVehicle(id, toPayload(form))
+    },
+    onSuccess: () => {
+      toast.success('Vehicle updated')
+      setEditOpen(false)
+      setEditing(null)
+      qc.invalidateQueries({ queryKey: ['admin_vehicles'] })
+    },
+    onError: (e) => toast.error(pickErrorMessage(e))
+  })
+
+  // -----------------------
+  // delete
+  // -----------------------
+  const del = useMutation({
+    mutationFn: async (vehicle) => {
+      const id = vehicle?._id || vehicle?.id
+      if (!id) throw new Error('Missing vehicle id')
+      return sdk.admin.deleteVehicle(id)
+    },
+    onSuccess: () => {
+      toast.success('Vehicle deleted')
       qc.invalidateQueries({ queryKey: ['admin_vehicles'] })
     },
     onError: (e) => toast.error(pickErrorMessage(e))
   })
 
   function openCreate() {
+    setForm(EMPTY_FORM)
     setOpen(true)
+  }
+
+  function openEdit(v) {
+    setEditing(v)
+    setForm({
+      code: v?.code || '',
+      vehicleType: v?.vehicleType || VEHICLE_TYPES.TRUCK,
+      capacityKg: v?.capacityKg ?? '',
+      isActive: v?.isActive ?? true,
+      shiftStart: v?.shiftStart || '08:00',
+      shiftEnd: v?.shiftEnd || '16:00',
+      crewUserIds: (v?.crewUserIds || []).map(String)
+    })
+    setEditOpen(true)
   }
 
   return (
@@ -105,7 +167,11 @@ export default function VehiclesPage() {
       {vehiclesQ.isLoading ? (
         <div className="text-sm text-muted">Loading vehicles...</div>
       ) : items.length === 0 ? (
-        <EmptyState title="No vehicles" description="Create vehicles to enable route generation and task assignment." action={<Button onClick={openCreate}>Create vehicle</Button>} />
+        <EmptyState
+          title="No vehicles"
+          description="Create vehicles to enable route generation and task assignment."
+          action={<Button onClick={openCreate}>Create vehicle</Button>}
+        />
       ) : (
         <Table>
           <THead>
@@ -117,22 +183,46 @@ export default function VehiclesPage() {
               <TH>Crew</TH>
               <TH>Status</TH>
               <TH>Created</TH>
+              <TH className="text-right">Actions</TH>
             </tr>
           </THead>
           <tbody>
             {items.map((v) => {
               const id = v._id || v.id
-              const crewIds = v.crewUserIds || []
+              const crewIds = (v.crewUserIds || []).map(String)
               const crewList = crewIds.map((cid) => crewById[String(cid)]?.email).filter(Boolean)
+
               return (
                 <TR key={id}>
                   <TD className="font-medium">{v.code}</TD>
-                  <TD><Badge variant={v.vehicleType === 'TRUCK' ? 'success' : 'warning'}>{v.vehicleType}</Badge></TD>
-                  <TD className="text-sm">{v.capacityKg != null ? `${v.capacityKg} kg` : <span className="text-muted">—</span>}</TD>
-                  <TD className="text-xs text-muted">{v.shiftStart || '—'} - {v.shiftEnd || '—'}</TD>
+                  <TD>
+                    <Badge variant={v.vehicleType === 'TRUCK' ? 'success' : 'warning'}>{v.vehicleType}</Badge>
+                  </TD>
+                  <TD className="text-sm">
+                    {v.capacityKg != null ? `${v.capacityKg} kg` : <span className="text-muted">—</span>}
+                  </TD>
+                  <TD className="text-xs text-muted">
+                    {v.shiftStart || '—'} - {v.shiftEnd || '—'}
+                  </TD>
                   <TD className="text-xs">{crewList.length ? crewList.join(', ') : <span className="text-muted">Unassigned</span>}</TD>
-                  <TD><Badge variant={v.isActive ? 'success' : 'danger'}>{v.isActive ? 'Active' : 'Inactive'}</Badge></TD>
+                  <TD>
+                    <Badge variant={v.isActive ? 'success' : 'danger'}>{v.isActive ? 'Active' : 'Inactive'}</Badge>
+                  </TD>
                   <TD className="text-xs text-muted">{formatDateTime(v.createdAt)}</TD>
+                  <TD className="text-right">
+                    <div className="inline-flex flex-wrap justify-end gap-2">
+                      <Button variant="outline" onClick={() => openEdit(v)}>Edit</Button>
+                      <Button
+                        variant="danger"
+                        disabled={del.isPending}
+                        onClick={() => {
+                          if (confirm(`Delete vehicle "${v.code}"?`)) del.mutate(v)
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TD>
                 </TR>
               )
             })}
@@ -140,6 +230,33 @@ export default function VehiclesPage() {
         </Table>
       )}
 
+      {/* ----------------- Edit Modal ----------------- */}
+      <Modal
+        open={editOpen}
+        onOpenChange={(v) => {
+          setEditOpen(v)
+          if (!v) setEditing(null)
+        }}
+        title="Edit vehicle"
+        description="Update vehicle details and crew assignment."
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button disabled={update.isPending} onClick={() => update.mutate()}>
+              {update.isPending ? 'Saving...' : 'Save changes'}
+            </Button>
+          </div>
+        }
+      >
+        <VehicleForm
+          form={form}
+          set={set}
+          crew={crew}
+          toggleCrew={toggleCrew}
+        />
+      </Modal>
+
+      {/* ----------------- Create Modal ----------------- */}
       <Modal
         open={open}
         onOpenChange={setOpen}
@@ -154,70 +271,86 @@ export default function VehiclesPage() {
           </div>
         }
       >
-        <div className="grid gap-4">
-          <div>
-            <Label>Code *</Label>
-            <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="e.g., TRUCK-01" />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Vehicle type *</Label>
-              <Select value={form.vehicleType} onChange={(e) => set('vehicleType', e.target.value)}>
-                {Object.values(VEHICLE_TYPES).map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label>Capacity (kg)</Label>
-              <Input value={form.capacityKg} onChange={(e) => set('capacityKg', e.target.value)} placeholder="e.g., 1500" />
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Shift start</Label>
-              <Input value={form.shiftStart} onChange={(e) => set('shiftStart', e.target.value)} placeholder="08:00" />
-            </div>
-            <div>
-              <Label>Shift end</Label>
-              <Input value={form.shiftEnd} onChange={(e) => set('shiftEnd', e.target.value)} placeholder="16:00" />
-            </div>
-          </div>
-
-          <div>
-            <Label>Crew assignment</Label>
-            <div className="mt-2 max-h-48 overflow-y-auto rounded-2xl border border-app">
-              {crew.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-muted">No crew users found. Create crew in Admin → Users.</div>
-              ) : (
-                crew.map((u) => {
-                  const uid = String(u._id || u.id)
-                  const checked = (form.crewUserIds || []).includes(uid)
-                  return (
-                    <label key={uid} className="flex cursor-pointer items-center gap-3 border-b border-app px-4 py-3 last:border-b-0 hover:bg-black/5 dark:hover:bg-white/5">
-                      <input type="checkbox" checked={checked} onChange={() => toggleCrew(uid)} />
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold">{u.email}</div>
-                        <div className="text-xs text-muted">{u.name || 'Crew member'}</div>
-                      </div>
-                    </label>
-                  )
-                })
-              )}
-            </div>
-          </div>
-
-          <Card>
-            <CardContent className="py-4 text-xs text-muted">
-              Note: Vehicle update/delete endpoints are not present in the backend. Use DB changes if needed.
-            </CardContent>
-          </Card>
-        </div>
+        <VehicleForm
+          form={form}
+          set={set}
+          crew={crew}
+          toggleCrew={toggleCrew}
+        />
       </Modal>
+    </div>
+  )
+}
+
+function VehicleForm({ form, set, crew, toggleCrew }) {
+  return (
+    <div className="grid gap-4">
+      <div>
+        <Label>Code *</Label>
+        <Input value={form.code} onChange={(e) => set('code', e.target.value)} placeholder="e.g., TRUCK-01" />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <Label>Vehicle type *</Label>
+          <Select value={form.vehicleType} onChange={(e) => set('vehicleType', e.target.value)}>
+            {Object.values(VEHICLE_TYPES).map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <Label>Capacity (kg)</Label>
+          <Input value={form.capacityKg} onChange={(e) => set('capacityKg', e.target.value)} placeholder="e.g., 1500" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <Label>Shift start</Label>
+          <Input value={form.shiftStart} onChange={(e) => set('shiftStart', e.target.value)} placeholder="08:00" />
+        </div>
+        <div>
+          <Label>Shift end</Label>
+          <Input value={form.shiftEnd} onChange={(e) => set('shiftEnd', e.target.value)} placeholder="16:00" />
+        </div>
+      </div>
+
+      <div>
+        <Label>Status</Label>
+        <Select value={String(!!form.isActive)} onChange={(e) => set('isActive', e.target.value === 'true')}>
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </Select>
+      </div>
+
+      <div>
+        <Label>Crew assignment</Label>
+        <div className="mt-2 max-h-48 overflow-y-auto rounded-2xl border border-app">
+          {crew.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-muted">No crew users found. Create crew in Admin → Users.</div>
+          ) : (
+            crew.map((u) => {
+              const uid = String(u._id || u.id)
+              const checked = (form.crewUserIds || []).map(String).includes(uid)
+              return (
+                <label
+                  key={uid}
+                  className="flex cursor-pointer items-center gap-3 border-b border-app px-4 py-3 last:border-b-0 hover:bg-black/5 dark:hover:bg-white/5"
+                >
+                  <input type="checkbox" checked={checked} onChange={() => toggleCrew(uid)} />
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">{u.email}</div>
+                    <div className="text-xs text-muted">{u.name || 'Crew member'}</div>
+                  </div>
+                </label>
+              )
+            })
+          )}
+        </div>
+      </div>
     </div>
   )
 }

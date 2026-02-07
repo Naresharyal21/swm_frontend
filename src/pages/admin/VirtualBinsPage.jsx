@@ -25,7 +25,7 @@ export default function VirtualBinsPage() {
 
   const zonesQ = useQuery({ queryKey: ['admin_zones'], queryFn: () => sdk.admin.listZones() })
   const householdsQ = useQuery({ queryKey: ['admin_households_all'], queryFn: () => sdk.admin.listHouseholds() })
-  const binsQ = useQuery({ queryKey: ['admin_bins_all'], queryFn: () => sdk.admin.listBins() })
+  const binsQ = useQuery({ queryKey: ['admin_bins_all'], queryFn: () => sdk.admin.listBins({ limit: 500 }) })
   const vbsQ = useQuery({
     queryKey: ['admin_virtual_bins', zoneId],
     queryFn: () => sdk.admin.listVirtualBins(zoneId ? { zoneId } : undefined)
@@ -51,8 +51,10 @@ export default function VirtualBinsPage() {
     return map
   }, [bins, householdById])
 
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({
+  // ----------------------------
+  // Create / Edit form
+  // ----------------------------
+  const EMPTY_FORM = {
     name: '',
     zoneId: '',
     lat: '',
@@ -61,39 +63,104 @@ export default function VirtualBinsPage() {
     over95: '',
     risk: '',
     isActive: true
-  })
+  }
+
+  const [open, setOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState(EMPTY_FORM)
 
   function set(k, v) {
     setForm((p) => ({ ...p, [k]: v }))
   }
 
+  function buildPayload() {
+    if (!form.name.trim()) throw new Error('Name is required')
+    if (!form.zoneId) throw new Error('Zone is required')
+    return {
+      name: form.name.trim(),
+      zoneId: form.zoneId,
+      centroid: toPoint(form.lng || 0, form.lat || 0),
+      thresholds: {
+        over80: numOrNull(form.over80),
+        over95: numOrNull(form.over95),
+        risk: numOrNull(form.risk)
+      },
+      isActive: !!form.isActive
+    }
+  }
+
+  function openCreate() {
+    setEditing(null)
+    setForm((p) => ({ ...EMPTY_FORM, zoneId: zoneId || p.zoneId }))
+    setOpen(true)
+  }
+
+  function openEdit(vb) {
+    setEditing(vb)
+    const c = vb?.centroid?.coordinates || vb?.centroid?.location?.coordinates
+    const lng = Array.isArray(c) ? c[0] : ''
+    const lat = Array.isArray(c) ? c[1] : ''
+
+    setForm({
+      name: vb?.name || '',
+      zoneId: String(vb?.zoneId || ''),
+      lat: lat ?? '',
+      lng: lng ?? '',
+      over80: vb?.thresholds?.over80 ?? '',
+      over95: vb?.thresholds?.over95 ?? '',
+      risk: vb?.thresholds?.risk ?? '',
+      isActive: vb?.isActive ?? true
+    })
+
+    setEditOpen(true)
+  }
+
   const create = useMutation({
-    mutationFn: async () => {
-      if (!form.name.trim()) throw new Error('Name is required')
-      if (!form.zoneId) throw new Error('Zone is required')
-      const payload = {
-        name: form.name.trim(),
-        zoneId: form.zoneId,
-        centroid: toPoint(form.lng || 0, form.lat || 0),
-        thresholds: {
-          over80: numOrNull(form.over80),
-          over95: numOrNull(form.over95),
-          risk: numOrNull(form.risk)
-        },
-        isActive: !!form.isActive
-      }
-      return sdk.admin.createVirtualBin(payload)
-    },
+    mutationFn: async () => sdk.admin.createVirtualBin(buildPayload()),
     onSuccess: () => {
       toast.success('Virtual bin created')
       setOpen(false)
-      setForm({ name: '', zoneId: '', lat: '', lng: '', over80: '', over95: '', risk: '', isActive: true })
+      setForm(EMPTY_FORM)
       qc.invalidateQueries({ queryKey: ['admin_virtual_bins'] })
     },
     onError: (e) => toast.error(pickErrorMessage(e))
   })
 
+  const update = useMutation({
+    mutationFn: async () => {
+      const id = editing?._id || editing?.id
+      if (!id) throw new Error('Missing virtual bin id')
+      return sdk.admin.updateVirtualBin(id, buildPayload())
+    },
+    onSuccess: () => {
+      toast.success('Virtual bin updated')
+      setEditOpen(false)
+      setEditing(null)
+      qc.invalidateQueries({ queryKey: ['admin_virtual_bins'] })
+      // bins can show member counts via virtualBinId, so refreshing bins helps too
+      qc.invalidateQueries({ queryKey: ['admin_bins_all'] })
+    },
+    onError: (e) => toast.error(pickErrorMessage(e))
+  })
+
+  const del = useMutation({
+    mutationFn: async (vb) => {
+      const id = vb?._id || vb?.id
+      if (!id) throw new Error('Missing virtual bin id')
+      return sdk.admin.deleteVirtualBin(id)
+    },
+    onSuccess: () => {
+      toast.success('Virtual bin deleted')
+      qc.invalidateQueries({ queryKey: ['admin_virtual_bins'] })
+      qc.invalidateQueries({ queryKey: ['admin_bins_all'] })
+    },
+    onError: (e) => toast.error(pickErrorMessage(e))
+  })
+
+  // ----------------------------
   // Members modal
+  // ----------------------------
   const [membersOpen, setMembersOpen] = useState(false)
   const [selectedVB, setSelectedVB] = useState(null)
   const [selectedBinIds, setSelectedBinIds] = useState([])
@@ -130,14 +197,10 @@ export default function VirtualBinsPage() {
       setMembersOpen(false)
       qc.invalidateQueries({ queryKey: ['admin_bins_all'] })
       qc.invalidateQueries({ queryKey: ['admin_bins'] })
+      qc.invalidateQueries({ queryKey: ['admin_virtual_bins'] })
     },
     onError: (e) => toast.error(pickErrorMessage(e))
   })
-
-  function openCreate() {
-    setForm((p) => ({ ...p, zoneId: zoneId || p.zoneId }))
-    setOpen(true)
-  }
 
   return (
     <div className="space-y-6">
@@ -162,7 +225,11 @@ export default function VirtualBinsPage() {
       {vbsQ.isLoading ? (
         <div className="text-sm text-muted">Loading virtual bins...</div>
       ) : items.length === 0 ? (
-        <EmptyState title="No virtual bins" description="Create a virtual bin to group household bins." action={<Button onClick={openCreate}>Create virtual bin</Button>} />
+        <EmptyState
+          title="No virtual bins"
+          description="Create a virtual bin to group household bins."
+          action={<Button onClick={openCreate}>Create virtual bin</Button>}
+        />
       ) : (
         <Table>
           <THead>
@@ -182,6 +249,7 @@ export default function VirtualBinsPage() {
               const z = zoneById[String(vb.zoneId)]
               const zoneBins = binsByZone[String(vb.zoneId)] || []
               const memberCount = zoneBins.filter((b) => String(b.virtualBinId || '') === String(id)).length
+
               return (
                 <TR key={id}>
                   <TD className="font-medium">{vb.name}</TD>
@@ -194,8 +262,23 @@ export default function VirtualBinsPage() {
                   </TD>
                   <TD>{memberCount}</TD>
                   <TD className="text-xs text-muted">{formatDateTime(vb.createdAt)}</TD>
+
                   <TD className="text-right">
-                    <Button variant="outline" onClick={() => openMembers(vb)}>Manage members</Button>
+                    <div className="inline-flex flex-wrap justify-end gap-2">
+                      <Button variant="outline" onClick={() => openMembers(vb)}>Manage members</Button>
+                      <Button variant="outline" onClick={() => openEdit(vb)}>Edit</Button>
+                      <Button
+                        variant="danger"
+                        disabled={del.isPending}
+                        onClick={() => {
+                          if (confirm(`Delete virtual bin "${vb.name}"? This will also clear bin memberships.`)) {
+                            del.mutate(vb)
+                          }
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </TD>
                 </TR>
               )
@@ -204,6 +287,7 @@ export default function VirtualBinsPage() {
         </Table>
       )}
 
+      {/* ---------------- Create Modal ---------------- */}
       <Modal
         open={open}
         onOpenChange={setOpen}
@@ -218,60 +302,31 @@ export default function VirtualBinsPage() {
           </div>
         }
       >
-        <div className="grid gap-4">
-          <div>
-            <Label>Name *</Label>
-            <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g., Ward 01 Cluster A" />
-          </div>
-          <div>
-            <Label>Zone *</Label>
-            <Select value={form.zoneId} onChange={(e) => set('zoneId', e.target.value)}>
-              <option value="">Select zone</option>
-              {zones.map((z) => (
-                <option key={z._id || z.id} value={z._id || z.id}>
-                  {z.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Latitude</Label>
-              <Input value={form.lat} onChange={(e) => set('lat', e.target.value)} placeholder="27.7" />
-            </div>
-            <div>
-              <Label>Longitude</Label>
-              <Input value={form.lng} onChange={(e) => set('lng', e.target.value)} placeholder="85.3" />
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <Label>over80 threshold (0-1)</Label>
-              <Input value={form.over80} onChange={(e) => set('over80', e.target.value)} placeholder="0.20" />
-            </div>
-            <div>
-              <Label>over95 threshold (0-1)</Label>
-              <Input value={form.over95} onChange={(e) => set('over95', e.target.value)} placeholder="0.10" />
-            </div>
-            <div>
-              <Label>risk threshold (0-100)</Label>
-              <Input value={form.risk} onChange={(e) => set('risk', e.target.value)} placeholder="65" />
-            </div>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <div className="text-sm font-semibold">How members work</div>
-              <div className="text-xs text-muted">Members are bins. Use “Manage members” after creation to assign bins.</div>
-            </CardHeader>
-            <CardContent className="text-xs text-muted">
-              Note: Edit/delete endpoints for virtual bins are not in the backend; you can deactivate through DB if needed.
-            </CardContent>
-          </Card>
-        </div>
+        <VirtualBinForm form={form} set={set} zones={zones} />
       </Modal>
 
+      {/* ---------------- Edit Modal ---------------- */}
+      <Modal
+        open={editOpen}
+        onOpenChange={(v) => {
+          setEditOpen(v)
+          if (!v) setEditing(null)
+        }}
+        title="Edit virtual bin"
+        description="Update virtual bin fields. Membership is managed separately."
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button disabled={update.isPending} onClick={() => update.mutate()}>
+              {update.isPending ? 'Saving...' : 'Save changes'}
+            </Button>
+          </div>
+        }
+      >
+        <VirtualBinForm form={form} set={set} zones={zones} />
+      </Modal>
+
+      {/* ---------------- Members Modal ---------------- */}
       <Modal
         open={membersOpen}
         onOpenChange={setMembersOpen}
@@ -327,6 +382,73 @@ export default function VirtualBinsPage() {
           </div>
         )}
       </Modal>
+    </div>
+  )
+}
+
+function VirtualBinForm({ form, set, zones }) {
+  return (
+    <div className="grid gap-4">
+      <div>
+        <Label>Name *</Label>
+        <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g., Ward 01 Cluster A" />
+      </div>
+
+      <div>
+        <Label>Zone *</Label>
+        <Select value={form.zoneId} onChange={(e) => set('zoneId', e.target.value)}>
+          <option value="">Select zone</option>
+          {zones.map((z) => (
+            <option key={z._id || z.id} value={z._id || z.id}>
+              {z.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <Label>Latitude</Label>
+          <Input value={form.lat} onChange={(e) => set('lat', e.target.value)} placeholder="27.7" />
+        </div>
+        <div>
+          <Label>Longitude</Label>
+          <Input value={form.lng} onChange={(e) => set('lng', e.target.value)} placeholder="85.3" />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div>
+          <Label>over80 threshold (0-1)</Label>
+          <Input value={form.over80} onChange={(e) => set('over80', e.target.value)} placeholder="0.20" />
+        </div>
+        <div>
+          <Label>over95 threshold (0-1)</Label>
+          <Input value={form.over95} onChange={(e) => set('over95', e.target.value)} placeholder="0.10" />
+        </div>
+        <div>
+          <Label>risk threshold (0-100)</Label>
+          <Input value={form.risk} onChange={(e) => set('risk', e.target.value)} placeholder="65" />
+        </div>
+      </div>
+
+      <div>
+        <Label>Status</Label>
+        <Select value={String(!!form.isActive)} onChange={(e) => set('isActive', e.target.value === 'true')}>
+          <option value="true">Active</option>
+          <option value="false">Inactive</option>
+        </Select>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="text-sm font-semibold">How members work</div>
+          <div className="text-xs text-muted">Members are bins. Use “Manage members” to assign bins.</div>
+        </CardHeader>
+        <CardContent className="text-xs text-muted">
+          Tip: Keep virtual bins per-zone for easier management.
+        </CardContent>
+      </Card>
     </div>
   )
 }

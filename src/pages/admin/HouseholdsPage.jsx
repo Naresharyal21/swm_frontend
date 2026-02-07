@@ -11,62 +11,39 @@ import { Modal } from '../../components/ui/modal'
 import { Table, THead, TH, TR, TD } from '../../components/ui/table'
 import { EmptyState } from '../../components/ui/empty'
 import { Badge } from '../../components/ui/badge'
-import { sdk } from '../../lib/sdk'
-import { WEEKDAYS } from '../../lib/constants'
-import { formatDateTime, pickErrorMessage, toPoint } from '../../lib/utils'
 
-function DayToggle({ value, onChange }) {
-  const set = new Set(value || [])
-  function toggle(d) {
-    const next = new Set(set)
-    if (next.has(d)) next.delete(d)
-    else next.add(d)
-    onChange(Array.from(next))
-  }
-  return (
-    <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-7">
-      {WEEKDAYS.map((d) => (
-        <button
-          key={d}
-          type="button"
-          onClick={() => toggle(d)}
-          className={[
-            'rounded-xl border border-app px-3 py-2 text-xs font-semibold transition',
-            set.has(d) ? 'bg-[rgba(var(--brand),0.15)] text-[rgb(var(--brand2))]' : 'hover:bg-black/5 dark:hover:bg-white/5'
-          ].join(' ')}
-        >
-          {d}
-        </button>
-      ))}
-    </div>
-  )
-}
+import { sdk } from '../../lib/sdk'
+import { formatDateTime, pickErrorMessage } from '../../lib/utils'
+
+const DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
 export default function HouseholdsPage() {
   const qc = useQueryClient()
 
+  const zonesQ = useQuery({ queryKey: ['admin_zones'], queryFn: () => sdk.admin.listZones() })
+  const plansQ = useQuery({ queryKey: ['admin_billing_plans'], queryFn: () => sdk.admin.listBillingPlans() })
+
   const [zoneId, setZoneId] = useState('')
 
-  const zonesQ = useQuery({ queryKey: ['admin_zones'], queryFn: () => sdk.admin.listZones() })
-  const usersQ = useQuery({ queryKey: ['admin_users'], queryFn: () => sdk.admin.listUsers() })
-  const plansQ = useQuery({ queryKey: ['admin_billing_plans'], queryFn: () => sdk.admin.listBillingPlans() })
-  const householdsQ = useQuery({
+  const q = useQuery({
     queryKey: ['admin_households', zoneId],
-    queryFn: () => sdk.admin.listHouseholds(zoneId ? { zoneId } : undefined)
+    queryFn: () => sdk.admin.listHouseholds(zoneId ? { zoneId } : {})
   })
 
+  const items = q.data?.items || []
   const zones = zonesQ.data?.items || []
-  const users = (usersQ.data?.items || []).filter((u) => u.role === 'CITIZEN')
   const plans = plansQ.data?.items || []
-  const items = householdsQ.data?.items || []
 
   const [open, setOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+
   const [form, setForm] = useState({
     zoneId: '',
     citizenUserId: '',
     address: '',
-    lat: '',
     lng: '',
+    lat: '',
     planId: '',
     pickupScheduleDays: ['MON', 'WED', 'FRI']
   })
@@ -75,73 +52,160 @@ export default function HouseholdsPage() {
     setForm((p) => ({ ...p, [k]: v }))
   }
 
+  function toggleDay(day) {
+    setForm((p) => {
+      const s = new Set(p.pickupScheduleDays || [])
+      if (s.has(day)) s.delete(day)
+      else s.add(day)
+      return { ...p, pickupScheduleDays: Array.from(s) }
+    })
+  }
+
+  function buildLocation() {
+    const lng = Number(form.lng)
+    const lat = Number(form.lat)
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null
+    return { type: 'Point', coordinates: [lng, lat] }
+  }
+
   const create = useMutation({
     mutationFn: async () => {
       if (!form.zoneId) throw new Error('Zone is required')
       if (!form.address.trim()) throw new Error('Address is required')
+
+      const location = buildLocation()
+      if (!location) throw new Error('Valid lng/lat required')
+
       const payload = {
         zoneId: form.zoneId,
-        citizenUserId: form.citizenUserId || null,
+        citizenUserId: form.citizenUserId?.trim() ? form.citizenUserId.trim() : null,
         address: form.address.trim(),
-        location: toPoint(form.lng, form.lat),
-        planId: form.planId || null,
-        pickupScheduleDays: form.pickupScheduleDays || []
+        location,
+        planId: form.planId?.trim() ? form.planId.trim() : null,
+        pickupScheduleDays: Array.isArray(form.pickupScheduleDays) ? form.pickupScheduleDays : undefined
       }
+
       return sdk.admin.createHousehold(payload)
     },
     onSuccess: () => {
       toast.success('Household created')
       setOpen(false)
-      setForm({
-        zoneId: '',
-        citizenUserId: '',
-        address: '',
-        lat: '',
-        lng: '',
-        planId: '',
-        pickupScheduleDays: ['MON', 'WED', 'FRI']
-      })
+      setForm({ zoneId: '', citizenUserId: '', address: '', lng: '', lat: '', planId: '', pickupScheduleDays: ['MON', 'WED', 'FRI'] })
       qc.invalidateQueries({ queryKey: ['admin_households'] })
     },
     onError: (e) => toast.error(pickErrorMessage(e))
   })
 
-  const zoneById = useMemo(() => Object.fromEntries(zones.map((z) => [String(z._id || z.id), z])), [zones])
-  const userById = useMemo(() => Object.fromEntries(users.map((u) => [String(u._id || u.id), u])), [users])
-  const planById = useMemo(() => Object.fromEntries(plans.map((p) => [String(p._id || p.id), p])), [plans])
+  const update = useMutation({
+    mutationFn: async () => {
+      const id = editing?._id || editing?.id
+      if (!id) throw new Error('Missing household id')
 
-  function openCreate() {
-    setForm((p) => ({ ...p, zoneId: zoneId || p.zoneId }))
-    setOpen(true)
+      const patch = {}
+      if (form.zoneId) patch.zoneId = form.zoneId
+      if (form.citizenUserId !== '') patch.citizenUserId = form.citizenUserId?.trim() ? form.citizenUserId.trim() : null
+      if (form.address.trim()) patch.address = form.address.trim()
+
+      // allow location update only if both present and valid
+      if (String(form.lng).trim() !== '' || String(form.lat).trim() !== '') {
+        const loc = buildLocation()
+        if (!loc) throw new Error('Valid lng/lat required to update location')
+        patch.location = loc
+      }
+
+      if (form.planId !== '') patch.planId = form.planId?.trim() ? form.planId.trim() : null
+      if (Array.isArray(form.pickupScheduleDays)) patch.pickupScheduleDays = form.pickupScheduleDays
+
+      if (Object.keys(patch).length === 0) throw new Error('Nothing to update')
+      return sdk.admin.updateHousehold(id, patch)
+    },
+    onSuccess: () => {
+      toast.success('Household updated')
+      setEditOpen(false)
+      setEditing(null)
+      qc.invalidateQueries({ queryKey: ['admin_households'] })
+    },
+    onError: (e) => toast.error(pickErrorMessage(e))
+  })
+
+  const del = useMutation({
+    mutationFn: async (h) => {
+      const id = h?._id || h?.id
+      if (!id) throw new Error('Missing household id')
+      return sdk.admin.deleteHousehold(id)
+    },
+    onSuccess: () => {
+      toast.success('Household deleted')
+      qc.invalidateQueries({ queryKey: ['admin_households'] })
+    },
+    onError: (e) => toast.error(pickErrorMessage(e))
+  })
+
+  function openEdit(h) {
+    setEditing(h)
+    const coords = h?.location?.coordinates || []
+    setForm({
+      zoneId: h?.zoneId || '',
+      citizenUserId: h?.citizenUserId || '',
+      address: h?.address || '',
+      lng: coords?.[0] ?? '',
+      lat: coords?.[1] ?? '',
+      planId: h?.planId || '',
+      pickupScheduleDays: h?.pickupScheduleDays?.length ? h.pickupScheduleDays : ['MON', 'WED', 'FRI']
+    })
+    setEditOpen(true)
   }
+
+  const byZone = useMemo(() => {
+    const m = {}
+    for (const h of items) {
+      const z = h.zoneId || 'UNKNOWN'
+      m[z] = (m[z] || 0) + 1
+    }
+    return m
+  }, [items])
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Households"
-        subtitle="Register citizen households and set pickup schedules."
-        right={
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="w-[220px]">
-              <option value="">All zones</option>
-              {zones.map((z) => (
-                <option key={z._id || z.id} value={z._id || z.id}>
-                  {z.name}
-                </option>
-              ))}
-            </Select>
-            <Button onClick={openCreate}>Create household</Button>
-          </div>
-        }
+        subtitle="Manage households (location, plan, pickup schedule)."
+        right={<Button onClick={() => setOpen(true)}>Create household</Button>}
       />
 
-      {householdsQ.isLoading ? (
+      <Card>
+        <CardContent className="py-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label>Filter by zone</Label>
+              <Select value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
+                <option value="">All zones</option>
+                {zones.map((z) => (
+                  <option key={z._id} value={z._id}>
+                    {z.name || z._id} ({byZone[z._id] || 0})
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex items-end gap-2">
+              <Button variant="outline" onClick={() => q.refetch()}>
+                Refresh
+              </Button>
+              <Button variant="ghost" onClick={() => setZoneId('')}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {q.isLoading ? (
         <div className="text-sm text-muted">Loading households...</div>
       ) : items.length === 0 ? (
         <EmptyState
           title="No households"
-          description="Create your first household to start billing and service scheduling."
-          action={<Button onClick={openCreate}>Create household</Button>}
+          description="Create households to attach bins and schedules."
+          action={<Button onClick={() => setOpen(true)}>Create household</Button>}
         />
       ) : (
         <Table>
@@ -149,38 +213,56 @@ export default function HouseholdsPage() {
             <tr>
               <TH>Address</TH>
               <TH>Zone</TH>
-              <TH>Citizen</TH>
               <TH>Plan</TH>
               <TH>Schedule</TH>
               <TH>Location</TH>
               <TH>Created</TH>
+              <TH className="text-right">Actions</TH>
             </tr>
           </THead>
           <tbody>
             {items.map((h) => {
-              const id = h._id || h.id
-              const z = zoneById[String(h.zoneId)]
-              const u = h.citizenUserId ? userById[String(h.citizenUserId)] : null
-              const p = h.planId ? planById[String(h.planId)] : null
-              const coords = h.location?.coordinates || []
+              const coords = h?.location?.coordinates || []
+              const z = zones.find((x) => x._id === h.zoneId)
+              const p = plans.find((x) => x._id === h.planId)
               return (
-                <TR key={id}>
+                <TR key={h._id || h.id}>
                   <TD className="font-medium">{h.address}</TD>
-                  <TD>{z?.name || <span className="text-muted">{String(h.zoneId || '—')}</span>}</TD>
-                  <TD>{u?.email || <span className="text-muted">Unassigned</span>}</TD>
-                  <TD>
-                    {p ? (
-                      <div className="flex items-center gap-2">
-                        <Badge variant={p.billingMode === 'DAILY_PICKUP' ? 'warning' : 'success'}>{p.billingMode}</Badge>
-                        <span>{p.name}</span>
+                  <TD>{z?.name || h.zoneId || <span className="text-muted">—</span>}</TD>
+                  <TD>{p?.name || (h.planId ? h.planId : <span className="text-muted">—</span>)}</TD>
+                  <TD className="text-xs">
+                    {(h.pickupScheduleDays || []).length ? (
+                      <div className="flex flex-wrap gap-1">
+                        {(h.pickupScheduleDays || []).map((d) => (
+                          <Badge key={d} variant="success">
+                            {d}
+                          </Badge>
+                        ))}
                       </div>
                     ) : (
-                      <span className="text-muted">None</span>
+                      <span className="text-muted">—</span>
                     )}
                   </TD>
-                  <TD className="text-xs">{(h.pickupScheduleDays || []).join(', ') || '—'}</TD>
-                  <TD className="text-xs text-muted">{coords.length ? `${coords[1]}, ${coords[0]}` : '—'}</TD>
+                  <TD className="text-xs text-muted">
+                    {coords?.length === 2 ? `${coords[0]}, ${coords[1]}` : '—'}
+                  </TD>
                   <TD className="text-xs text-muted">{formatDateTime(h.createdAt)}</TD>
+                  <TD className="text-right">
+                    <div className="inline-flex flex-wrap justify-end gap-2">
+                      <Button variant="outline" onClick={() => openEdit(h)}>
+                        Edit
+                      </Button>
+                      <Button
+                        variant="danger"
+                        disabled={del.isPending}
+                        onClick={() => {
+                          if (confirm(`Delete household "${h.address}"?`)) del.mutate(h)
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TD>
                 </TR>
               )
             })}
@@ -188,11 +270,35 @@ export default function HouseholdsPage() {
         </Table>
       )}
 
+      {/* Edit */}
+      <Modal
+        open={editOpen}
+        onOpenChange={(v) => {
+          setEditOpen(v)
+          if (!v) setEditing(null)
+        }}
+        title="Edit household"
+        description="Update household fields."
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={update.isPending} onClick={() => update.mutate()}>
+              {update.isPending ? 'Saving...' : 'Save changes'}
+            </Button>
+          </div>
+        }
+      >
+        <HouseholdForm zones={zones} plans={plans} form={form} set={set} toggleDay={toggleDay} />
+      </Modal>
+
+      {/* Create */}
       <Modal
         open={open}
         onOpenChange={setOpen}
         title="Create household"
-        description="Zone + address + coordinates are required."
+        description="Add a household with location and pickup schedule."
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>
@@ -204,73 +310,76 @@ export default function HouseholdsPage() {
           </div>
         }
       >
-        <div className="grid gap-4">
-          <div>
-            <Label>Zone *</Label>
-            <Select value={form.zoneId} onChange={(e) => set('zoneId', e.target.value)}>
-              <option value="">Select zone</option>
-              {zones.map((z) => (
-                <option key={z._id || z.id} value={z._id || z.id}>
-                  {z.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          <div>
-            <Label>Citizen user (optional)</Label>
-            <Select value={form.citizenUserId} onChange={(e) => set('citizenUserId', e.target.value)}>
-              <option value="">Unassigned</option>
-              {users.map((u) => (
-                <option key={u._id || u.id} value={u._id || u.id}>
-                  {u.email}
-                </option>
-              ))}
-            </Select>
-            <div className="mt-1 text-xs text-muted">If not assigned, the household can be linked later via seed or manual DB update.</div>
-          </div>
-
-          <div>
-            <Label>Address *</Label>
-            <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="e.g., Ward 01, Street 10, Kathmandu" />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Latitude *</Label>
-              <Input value={form.lat} onChange={(e) => set('lat', e.target.value)} placeholder="27.7172" />
-            </div>
-            <div>
-              <Label>Longitude *</Label>
-              <Input value={form.lng} onChange={(e) => set('lng', e.target.value)} placeholder="85.3240" />
-            </div>
-          </div>
-
-          <div>
-            <Label>Billing plan (optional)</Label>
-            <Select value={form.planId} onChange={(e) => set('planId', e.target.value)}>
-              <option value="">None</option>
-              {plans.map((p) => (
-                <option key={p._id || p.id} value={p._id || p.id}>
-                  {p.name} ({p.billingMode})
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          <div>
-            <Label>Pickup schedule days</Label>
-            <DayToggle value={form.pickupScheduleDays} onChange={(v) => set('pickupScheduleDays', v)} />
-            <div className="mt-1 text-xs text-muted">Used for ROUTINE_PICKUP auto generation when routes are generated.</div>
-          </div>
-
-          <Card>
-            <CardContent className="py-4 text-xs text-muted">
-              Note: Household update/delete endpoints are not present in the backend. This UI focuses on create + list.
-            </CardContent>
-          </Card>
-        </div>
+        <HouseholdForm zones={zones} plans={plans} form={form} set={set} toggleDay={toggleDay} />
       </Modal>
+    </div>
+  )
+}
+
+function HouseholdForm({ zones, plans, form, set, toggleDay }) {
+  return (
+    <div className="grid gap-4">
+      <div>
+        <Label>Zone *</Label>
+        <Select value={form.zoneId} onChange={(e) => set('zoneId', e.target.value)}>
+          <option value="">Select zone</option>
+          {zones.map((z) => (
+            <option key={z._id} value={z._id}>
+              {z.name || z._id}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      <div>
+        <Label>Address *</Label>
+        <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="House address" />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label>Longitude (lng) *</Label>
+          <Input value={form.lng} onChange={(e) => set('lng', e.target.value)} placeholder="85.3240" />
+        </div>
+        <div>
+          <Label>Latitude (lat) *</Label>
+          <Input value={form.lat} onChange={(e) => set('lat', e.target.value)} placeholder="27.7172" />
+        </div>
+      </div>
+
+      <div>
+        <Label>Citizen userId (optional)</Label>
+        <Input value={form.citizenUserId} onChange={(e) => set('citizenUserId', e.target.value)} placeholder="User ObjectId" />
+      </div>
+
+      <div>
+        <Label>Billing plan (optional)</Label>
+        <Select value={form.planId} onChange={(e) => set('planId', e.target.value)}>
+          <option value="">No plan</option>
+          {plans.map((p) => (
+            <option key={p._id} value={p._id}>
+              {p.name || p._id}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      <div>
+        <Label>Pickup schedule days</Label>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {DAYS.map((d) => (
+            <Button
+              key={d}
+              type="button"
+              variant={form.pickupScheduleDays?.includes(d) ? 'default' : 'outline'}
+              onClick={() => toggleDay(d)}
+            >
+              {d}
+            </Button>
+          ))}
+        </div>
+        <div className="mt-2 text-xs text-muted">Stored in Household.pickupScheduleDays</div>
+      </div>
     </div>
   )
 }
