@@ -1,22 +1,21 @@
-import React, { useMemo } from "react";
+// src/pages/citizen/InvoicesPage.jsx
+import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+
 import { api, unwrap } from "../../lib/api";
 
-// OPTIONAL: PDF download (frontend-only). If you don't want PDF, remove these 2 imports + PDF code below.
-// npm i jspdf jspdf-autotable
+// OPTIONAL: PDF download (frontend-only).
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 // -------------------------
-// Local UI helpers
+// UI helpers
 // -------------------------
 function PageHeader({ title, subtitle }) {
   return (
     <div style={{ marginBottom: 12 }}>
       <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "rgb(var(--fg))" }}>{title}</h1>
-      {subtitle ? (
-        <div style={{ marginTop: 4, opacity: 0.75, color: "rgb(var(--muted))" }}>{subtitle}</div>
-      ) : null}
+      {subtitle ? <div style={{ marginTop: 4, opacity: 0.75, color: "rgb(var(--muted))" }}>{subtitle}</div> : null}
     </div>
   );
 }
@@ -43,103 +42,25 @@ function Message({ type = "info", text }) {
   );
 }
 
+// -------------------------
+// Utils
+// -------------------------
+const MONTHS = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December"
+];
+
 function normalizeStatus(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
+  return String(value || "").trim().toUpperCase();
 }
-
-/**
- * Status chip colors:
- * - completed/success/paid: green
- * - pending/processing: amber/yellow
- * - initiated: red (as requested)
- * - failed/cancelled/rejected: red
- * - else: neutral
- */
-function statusChipStyle(statusRaw) {
-  const s = normalizeStatus(statusRaw);
-
-  const isCompleted =
-    s === "completed" ||
-    s === "complete" ||
-    s === "success" ||
-    s === "succeeded" ||
-    s === "paid" ||
-    s === "settled";
-
-  const isPending = s === "pending" || s === "processing" || s === "in_progress" || s === "awaiting";
-
-  const isFailed =
-    s === "failed" ||
-    s === "cancelled" ||
-    s === "canceled" ||
-    s === "rejected" ||
-    s === "error" ||
-    s === "initiated" ||
-    s === "initiate" ||
-    s === "initiating";
-
-  if (isCompleted) {
-    return {
-      background: "rgba(34, 197, 94, 0.14)",
-      border: "1px solid rgba(34, 197, 94, 0.40)",
-      color: "rgb(22, 163, 74)",
-    };
-  }
-
-  if (isPending) {
-    return {
-      background: "rgba(245, 158, 11, 0.14)",
-      border: "1px solid rgba(245, 158, 11, 0.40)",
-      color: "rgb(217, 119, 6)",
-    };
-  }
-
-  if (isFailed) {
-    const isInitiated = s === "initiated" || s === "initiate" || s === "initiating";
-    return {
-      background: isInitiated ? "rgba(var(--danger), 0.18)" : "rgba(var(--danger), 0.12)",
-      border: "1px solid rgba(var(--danger), 0.45)",
-      color: "rgb(var(--danger))",
-    };
-  }
-
-  return {
-    background: "rgba(var(--border), 0.18)",
-    border: "1px solid rgb(var(--border))",
-    color: "rgb(var(--fg))",
-    opacity: 0.9,
-  };
-}
-
-function prettyStatus(value) {
-  const raw = String(value ?? "—");
-  if (!raw || raw === "—") return "—";
-  if (raw.includes(" ")) return raw;
-  return raw
-    .replace(/_/g, " ")
-    .replace(/-/g, " ")
-    .trim()
-    .replace(/\b\w/g, (m) => m.toUpperCase());
-}
-
-// -------------------------
-// Mongo / populated helpers
-// -------------------------
-function unwrapOid(v) {
-  if (!v) return null;
-  if (typeof v === "string") return v;
-  if (typeof v === "object" && v.$oid) return v.$oid;
-  return null;
+function isComplete(tx) {
+  return normalizeStatus(tx?.status) === "COMPLETE";
 }
 
 function unwrapDate(v) {
   if (!v) return null;
   if (v instanceof Date) return v;
   if (typeof v === "string" || typeof v === "number") return v;
-
   if (typeof v === "object" && v.$date != null) {
     const d = v.$date;
     if (typeof d === "string" || typeof d === "number") return d;
@@ -173,39 +94,42 @@ function fmtAdDateTime(adValue) {
   return d ? d.toLocaleString() : "—";
 }
 
-function moneyNPR(value) {
-  const n = Number(value);
-  if (Number.isNaN(n)) return "—";
-  return new Intl.NumberFormat("en-NP", { style: "currency", currency: "NPR" }).format(n);
+function keyYM(year, month1to12) {
+  return `${year}-${String(month1to12).padStart(2, "0")}`;
 }
 
-function getUserName(inv) {
-  const u = inv?.userId;
-  if (u && typeof u === "object") {
-    return (
-      u.fullName ||
-      u.name ||
-      [u.firstName, u.lastName].filter(Boolean).join(" ") ||
-      u.email ||
-      unwrapOid(u._id) ||
-      "—"
-    );
+function expandCoverMonths(coverFrom, coverTo) {
+  const from = toJsDate(coverFrom);
+  const to = toJsDate(coverTo);
+  if (!from || !to) return [];
+
+  const out = [];
+  const cur = new Date(from.getFullYear(), from.getMonth(), 1);
+  const end = new Date(to.getFullYear(), to.getMonth(), 1);
+
+  while (cur.getTime() < end.getTime()) {
+    out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`);
+    cur.setMonth(cur.getMonth() + 1);
   }
-  return unwrapOid(inv?.userId) || "—";
+  return out;
 }
 
-function getPlanText(inv) {
-  const p = inv?.planId;
-  if (p && typeof p === "object") {
-    return p.name || unwrapOid(p._id) || "—";
-  }
-  return unwrapOid(inv?.planId) || "—";
+function toNpr(amount) {
+  const n = Number(amount || 0);
+  if (!Number.isFinite(n)) return "0";
+  return n.toLocaleString("en-US");
+}
+
+function toLocaleAmount(v) {
+  const n = Number(v || 0);
+  if (!Number.isFinite(n)) return "0";
+  return n.toLocaleString("en-US");
 }
 
 // -------------------------
-// API call
+// API
 // -------------------------
-async function fetchInvoices() {
+async function fetchTransactions() {
   const res = await api.get("/citizen/transactions");
   const data = unwrap(res);
 
@@ -216,53 +140,115 @@ async function fetchInvoices() {
 }
 
 // -------------------------
-// Frontend PDF generator
+// PDF helpers
 // -------------------------
-function downloadInvoicePdf(inv) {
+function addPdfCopyright(doc) {
+  const pageCount = doc.internal.getNumberOfPages();
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+
+  for (let p = 1; p <= pageCount; p++) {
+    doc.setPage(p);
+    doc.setFontSize(9);
+    doc.setTextColor(120);
+
+    const left = 14;
+    const right = pageW - 14;
+
+    doc.text("© SmartWasteManagement", left, pageH - 8);
+    doc.text(`Page ${p} / ${pageCount}`, right, pageH - 8, { align: "right" });
+
+    doc.setTextColor(0);
+  }
+}
+
+// -------------------------
+// PDF: Month Status (12 months)
+// -------------------------
+function downloadCalendarPdf({ year, paidMap, currentYear, currentMonth }) {
   const doc = new jsPDF();
-
-  const invoiceId = inv?.transactionUuid || unwrapOid(inv?._id) || "invoice";
-  const createdText = fmtAdDateTime(inv?.createdAt || inv?.updatedAt || inv?.date);
-
-  const userText = getUserName(inv);
-  const planText = getPlanText(inv);
-
   doc.setFontSize(16);
-  doc.text("Invoice", 14, 16);
+  doc.text(`Invoices Status - ${year}`, 14, 16);
 
-  doc.setFontSize(11);
-  doc.text(`Invoice ID: ${invoiceId}`, 14, 26);
-  doc.text(`Date (AD): ${createdText}`, 14, 33);
-  doc.text(`Provider: ${inv?.provider || "—"}`, 14, 40);
-  doc.text(`Status: ${prettyStatus(inv?.status || "—")}`, 14, 47);
+  const rows = MONTHS.map((m, idx) => {
+    const month = idx + 1;
+    const k = keyYM(year, month);
+    const paid = !!paidMap.get(k);
+    const isCurrent = year === currentYear && month === currentMonth;
+
+    return [
+      String(month),
+      m,
+      paid ? "PAID" : "UNPAID",
+      isCurrent ? "CURRENT" : "",
+    ];
+  });
 
   autoTable(doc, {
-    startY: 55,
-    head: [["Field", "Value"]],
-    body: [
-      ["Transaction UUID", inv?.transactionUuid || "—"],
-      ["User", userText],
-      ["Plan", planText],
-      ["Amount", `${inv?.amount ?? "—"} ${inv?.currency || "NPR"}`],
-      ["Product Code", inv?.productCode || "—"],
-      ["Provider Ref ID", inv?.providerRefId || "—"],
-      ["Created At", createdText],
-    ],
+    startY: 24,
+    head: [["Month#", "Month", "Status", ""]],
+    body: rows,
     styles: { fontSize: 10 },
+    theme: "grid",
+    columnStyles: {
+      3: { cellWidth: 26, halign: "center", fontStyle: "bold" },
+    },
+  });
+
+  const endY = doc.lastAutoTable?.finalY || 120;
+  doc.setFontSize(9);
+  doc.text("Status is computed from COMPLETE MONTHLY/ANNUAL transactions only.", 14, endY + 10);
+
+  addPdfCopyright(doc);
+  doc.save(`invoice-status-${year}.pdf`);
+}
+
+// -------------------------
+// PDF: Daily/Bulky list
+// -------------------------
+function downloadDailyBulkyPdf({ year, items }) {
+  const doc = new jsPDF();
+  doc.setFontSize(16);
+  doc.text(`Daily/Bulky Payments (AD) - ${year}`, 14, 16);
+
+  const rows = (items || []).map((t, idx) => [
+    String(idx + 1),
+    fmtAdDateTime(t?.createdAt || t?.updatedAt || t?.date),
+    String(t?.kind || "").toUpperCase(),
+    `Rs. ${toNpr(t?.amount)}`,
+    t?.transactionUuid || t?.txUuid || "—",
+    t?.providerRefId || t?.providerReference || "—",
+  ]);
+
+  autoTable(doc, {
+    startY: 24,
+    head: [["SN", "Date/Time", "Kind", "Amount", "Tx UUID", "Ref ID"]],
+    body: rows.length ? rows : [["—", "—", "—", "—", "—", "—"]],
+    styles: { fontSize: 9 },
     theme: "grid",
   });
 
   const endY = doc.lastAutoTable?.finalY || 120;
   doc.setFontSize(9);
-  doc.text("System-generated invoice (frontend PDF).", 14, endY + 10);
+  doc.text("List includes only status=COMPLETE and kind=DAILY/BULKY.", 14, endY + 10);
 
-  doc.save(`invoice-${invoiceId}.pdf`);
+  addPdfCopyright(doc);
+  doc.save(`daily-bulky-payments-${year}.pdf`);
 }
 
+// -------------------------
+// Component
+// -------------------------
 export default function InvoicesPage() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  const [year, setYear] = useState(currentYear);
+
   const q = useQuery({
     queryKey: ["citizen", "transactions"],
-    queryFn: fetchInvoices,
+    queryFn: fetchTransactions,
     staleTime: 30_000,
     retry: (count, err) => {
       const status = err?.response?.status;
@@ -271,171 +257,345 @@ export default function InvoicesPage() {
     },
   });
 
-  const invoices = Array.isArray(q.data) ? q.data : [];
+  const txs = Array.isArray(q.data) ? q.data : [];
 
-  // Group by AD Year-Month only
-  const groups = useMemo(() => {
+  // paidMap: "YYYY-MM" -> true (MONTHLY/ANNUAL complete)
+  const paidMap = useMemo(() => {
     const map = new Map();
 
-    for (const inv of invoices) {
-      const adVal = inv?.createdAt || inv?.updatedAt || inv?.date || inv?.invoiceDate;
-      const d = toJsDate(adVal);
+    for (const t of txs) {
+      if (!isComplete(t)) continue;
 
-      const key = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` : "Unknown";
+      const kind = String(t?.kind || "").toUpperCase();
+      if (kind !== "MONTHLY" && kind !== "ANNUAL") continue;
 
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(inv);
+      const cov = expandCoverMonths(t?.coverFrom, t?.coverTo);
+      if (cov.length) {
+        for (const k of cov) if (k.startsWith(`${year}-`)) map.set(k, true);
+        continue;
+      }
+
+      if (Number.isFinite(t?.targetYear) && Number.isFinite(t?.targetMonth)) {
+        const k = keyYM(Number(t.targetYear), Number(t.targetMonth));
+        if (k.startsWith(`${year}-`)) map.set(k, true);
+        continue;
+      }
+
+      const d = toJsDate(t?.createdAt || t?.updatedAt || t?.date);
+      if (d && d.getFullYear() === year) map.set(keyYM(d.getFullYear(), d.getMonth() + 1), true);
     }
 
-    const entries = Array.from(map.entries());
-    entries.sort((a, b) => {
-      if (a[0] === "Unknown") return 1;
-      if (b[0] === "Unknown") return -1;
-      return b[0].localeCompare(a[0]); // newest month first
+    return map;
+  }, [txs, year]);
+
+  const dailyBulky = useMemo(() => {
+    const out = [];
+
+    for (const t of txs) {
+      if (!isComplete(t)) continue;
+
+      const kind = String(t?.kind || "").toUpperCase();
+      if (kind !== "DAILY" && kind !== "BULKY") continue;
+
+      const d = toJsDate(t?.createdAt || t?.updatedAt || t?.date);
+      if (!d) continue;
+      if (d.getFullYear() !== year) continue;
+
+      out.push(t);
+    }
+
+    out.sort((a, b) => {
+      const da = toJsDate(a?.createdAt || a?.updatedAt || a?.date)?.getTime() || 0;
+      const db = toJsDate(b?.createdAt || b?.updatedAt || b?.date)?.getTime() || 0;
+      return db - da;
     });
 
-    return entries;
-  }, [invoices]);
+    return out;
+  }, [txs, year]);
 
   const errStatus = q.error?.response?.status;
   const errMsg = q.error?.response?.data?.message || q.error?.message || "Failed to load invoices";
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, color: "rgb(var(--fg))" }}>
-      <PageHeader title="Invoices" subtitle="Payment transactions (AD dates only)" />
+      <PageHeader
+        title="Invoices"
+       
+      />
 
-      {q.isLoading && <Message type="info" text="Loading invoices..." />}
+      {q.isLoading && <Message type="info" text="Loading..." />}
 
       {q.isError && (
         <Message
           type="error"
           text={
             errStatus === 401
-              ? "401 Unauthorized. Please log in again as Citizen."
+              ? "401 Unauthorized. Please log in again."
               : errStatus === 403
-              ? "403 Forbidden. Your role does not have permission to view invoices."
+              ? "403 Forbidden."
               : errMsg
           }
         />
       )}
 
-      {!q.isLoading && !q.isError && invoices.length === 0 && <Message type="info" text="No invoices found." />}
-
-      {!q.isLoading && !q.isError && invoices.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {groups.map(([ym, items]) => (
+      {!q.isLoading && !q.isError && (
+        <>
+          {/* ---------------- 12 months status grid ---------------- */}
+          <div
+            style={{
+              border: "1px solid rgb(var(--border))",
+              borderRadius: 12,
+              overflow: "hidden",
+              background: "rgb(var(--card))",
+            }}
+          >
             <div
-              key={ym}
               style={{
-                border: "1px solid rgb(var(--border))",
-                borderRadius: 12,
-                overflow: "hidden",
-                background: "rgb(var(--card))",
+                padding: 12,
+                borderBottom: "1px solid rgb(var(--border))",
+                background: "rgba(var(--border), 0.18)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 10,
               }}
             >
-              <div
-                style={{
-                  padding: 12,
-                  borderBottom: "1px solid rgb(var(--border))",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  background: "rgba(var(--border), 0.18)",
-                  color: "rgb(var(--fg))",
-                }}
-              >
-                <div style={{ fontWeight: 800 }}>{ym === "Unknown" ? "Unknown period" : `AD ${ym}`}</div>
-                <div style={{ opacity: 0.75, fontSize: 13, color: "rgb(var(--muted))" }}>
-                  {items.length} record(s)
-                </div>
-              </div>
+              <div style={{ fontWeight: 600 }}>Month Status (AD)</div>
 
-              <div style={{ padding: 12, overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, color: "rgb(var(--fg))" }}>
-                  <thead>
-                    <tr style={{ textAlign: "left", borderBottom: "1px solid rgb(var(--border))" }}>
-                      <th style={{ padding: "8px 8px 8px 0" }}>Transaction UUID</th>
-                      <th style={{ padding: "8px 8px" }}>User</th>
-                      <th style={{ padding: "8px 8px" }}>Plan</th>
-                      <th style={{ padding: "8px 8px" }}>Provider</th>
-                      <th style={{ padding: "8px 8px" }}>Created (AD)</th>
-                      <th style={{ padding: "8px 8px" }}>Amount</th>
-                      <th style={{ padding: "8px 8px" }}>Status</th>
-                      <th style={{ padding: "8px 8px" }}>PDF</th>
-                    </tr>
-                  </thead>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <select
+                  value={String(year)}
+                  onChange={(e) => setYear(Number(e.target.value))}
+                  style={{
+                    border: "1px solid rgb(var(--border))",
+                    background: "rgb(var(--card))",
+                    color: "rgb(var(--fg))",
+                    borderRadius: 10,
+                    padding: "6px 10px",
+                    fontSize: 13,
+                  }}
+                >
+                  {Array.from({ length: 7 }).map((_, i) => {
+                    const y = currentYear - 3 + i;
+                    return (
+                      <option key={y} value={String(y)}>
+                        {y}
+                      </option>
+                    );
+                  })}
+                </select>
 
-                  <tbody>
-                    {items.map((inv, idx) => {
-                      const rowId = unwrapOid(inv?._id) || inv?.id || `${ym}-${idx}`;
-
-                      const txn = inv?.transactionUuid || unwrapOid(inv?._id) || "—";
-                      const provider = inv?.provider || "—";
-                      const createdAt = inv?.createdAt || inv?.updatedAt || inv?.date;
-
-                      const amount = inv?.amount ?? inv?.total ?? inv?.grandTotal ?? inv?.dueAmount;
-                      const currency = inv?.currency || "NPR";
-                      const status = inv?.status ?? inv?.paymentStatus ?? inv?.state ?? "—";
-
-                      const userName = getUserName(inv);
-                      const planName = getPlanText(inv);
-
-                      const chip = statusChipStyle(status);
-
-                      return (
-                        <tr key={rowId} style={{ borderBottom: "1px solid rgba(var(--border), 0.45)" }}>
-                          <td style={{ padding: "10px 8px 10px 0", fontFamily: "monospace" }}>{txn}</td>
-                          <td style={{ padding: "10px 8px" }}>{userName}</td>
-                          <td style={{ padding: "10px 8px" }}>{planName}</td>
-                          <td style={{ padding: "10px 8px" }}>{provider}</td>
-                          <td style={{ padding: "10px 8px" }}>{fmtAdDateTime(createdAt)}</td>
-                          <td style={{ padding: "10px 8px" }}>
-                            {currency === "NPR" ? moneyNPR(amount) : `${amount ?? "—"} ${currency}`}
-                          </td>
-                          <td style={{ padding: "10px 8px" }}>
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                padding: "3px 10px",
-                                borderRadius: 999,
-                                fontSize: 12,
-                                fontWeight: 700,
-                                ...chip,
-                              }}
-                            >
-                              {prettyStatus(status)}
-                            </span>
-                          </td>
-                          <td style={{ padding: "10px 8px" }}>
-                            <button
-                              type="button"
-                              onClick={() => downloadInvoicePdf(inv)}
-                              style={{
-                                border: "1px solid rgb(var(--border))",
-                                background: "rgb(var(--card))",
-                                color: "rgb(var(--fg))",
-                                padding: "6px 10px",
-                                borderRadius: 10,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Download
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-
-                <div style={{ marginTop: 10, opacity: 0.75, fontSize: 12, color: "rgb(var(--muted))" }}>
-                  See payment Date Before Payment.
-                </div>
+                <button
+                  type="button"
+                  onClick={() => downloadCalendarPdf({ year, paidMap, currentYear, currentMonth })}
+                  style={{
+                    border: "1px solid rgb(var(--border))",
+                    background: "rgb(var(--card))",
+                    color: "rgb(var(--fg))",
+                    padding: "6px 10px",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  Download PDF
+                </button>
               </div>
             </div>
-          ))}
-        </div>
+
+            <div style={{ padding: 12 }}>
+              <div
+                className="month12-grid"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+                  gap: 10,
+                }}
+              >
+                {MONTHS.map((m, idx) => {
+                  const month = idx + 1;
+                  const k = keyYM(year, month);
+                  const paid = !!paidMap.get(k);
+
+                  const isCurrent = year === currentYear && month === currentMonth;
+
+                  // paid green / unpaid red
+                  const textColor = paid ? "rgb(22, 163, 74)" : "rgb(220, 38, 38)";
+                  const borderColor = paid ? "rgba(34,197,94,0.70)" : "rgba(239,68,68,0.70)";
+                  const bg = paid ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.08)";
+
+                  return (
+                    <div
+                      key={k}
+                      style={{
+                        border: `2px solid ${borderColor}`, // ✅ normal paid/unpaid border
+                        borderRadius: 12,
+                        padding: "10px 8px",
+                        background: bg,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        minHeight: 84,
+                      }}
+                      title={`${m} ${year} - ${paid ? "PAID" : "UNPAID"}${isCurrent ? " (CURRENT)" : ""}`}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 900, lineHeight: 1.1, color: textColor }}>
+                          {m.slice(0, 3).toUpperCase()}
+                        </div>
+
+                        {/* ✅ CURRENT indicator: green text only (NO BORDER) */}
+                        {isCurrent ? (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 900,
+                              color: "rgb(22, 163, 74)", // ✅ green
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Active Month 
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* Status: colored text */}
+                      <div
+                        style={{
+                          marginTop: "auto",
+                          fontSize: 11,
+                          fontWeight: 900,
+                          padding: "4px 8px",
+                          borderRadius: 999,
+                          border: `1px solid ${borderColor}`,
+                          background: "rgba(0,0,0,0.02)",
+                          color: textColor, // ✅ green/red
+                          textAlign: "center",
+                          letterSpacing: 0.2,
+                        }}
+                      >
+                        {paid ? "PAID" : "UNPAID"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <style>{`
+                @media (max-width: 520px) {
+                  .month12-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+                }
+                @media (min-width: 521px) and (max-width: 900px) {
+                  .month12-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+                }
+                @media (min-width: 901px) {
+                  .month12-grid { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; }
+                }
+              `}</style>
+
+             
+            </div>
+          </div>
+
+          {/* ---------------- Daily/Bulky payments ---------------- */}
+          <div
+            style={{
+              border: "1px solid rgb(var(--border))",
+              borderRadius: 12,
+              overflow: "hidden",
+              background: "rgb(var(--card))",
+            }}
+          >
+            <div
+              style={{
+                padding: 12,
+                borderBottom: "1px solid rgb(var(--border))",
+                background: "rgba(var(--border), 0.18)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>Daily / Bulk Payments</div>
+
+              <button
+                type="button"
+                onClick={() => downloadDailyBulkyPdf({ year, items: dailyBulky })}
+                style={{
+                  border: "1px solid rgb(var(--border))",
+                  background: "rgb(var(--card))",
+                  color: "rgb(var(--fg))",
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+                disabled={!dailyBulky.length}
+                title={!dailyBulky.length ? "No COMPLETE daily/bulky payments" : ""}
+              >
+                Download Invoice as PDF
+              </button>
+            </div>
+
+            <div style={{ padding: 12 }}>
+              {dailyBulky.length === 0 ? (
+                <Message type="info" text="No COMPLETE daily/bulky payments for this year." />
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        {["SN", "Date/Time", "Kind", "Amount", "Tx UUID", "Ref ID"].map((h) => (
+                          <th
+                            key={h}
+                            style={{
+                              textAlign: "left",
+                              padding: "10px 8px",
+                              borderBottom: "1px solid rgb(var(--border))",
+                              color: "rgb(var(--muted))",
+                              fontWeight: 800,
+                              fontSize: 12,
+                            }}
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dailyBulky.map((t, idx) => (
+                        <tr key={t?._id || t?.transactionUuid || idx}>
+                          <td style={{ padding: "10px 8px", borderBottom: "1px solid rgba(var(--border),0.5)" }}>
+                            {idx + 1}
+                          </td>
+                          <td style={{ padding: "10px 8px", borderBottom: "1px solid rgba(var(--border),0.5)" }}>
+                            {fmtAdDateTime(t?.createdAt || t?.updatedAt || t?.date)}
+                          </td>
+                          <td style={{ padding: "10px 8px", borderBottom: "1px solid rgba(var(--border),0.5)", fontWeight: 600 }}>
+                            {String(t?.kind || "").toUpperCase()}
+                          </td>
+                          <td style={{ padding: "10px 8px", borderBottom: "1px solid rgba(var(--border),0.5)" }}>
+                            Rs. {toLocaleAmount(t?.amount)}
+                          </td>
+                          <td style={{ padding: "10px 8px", borderBottom: "1px solid rgba(var(--border),0.5)" }}>
+                            {t?.transactionUuid || t?.txUuid || "—"}
+                          </td>
+                          <td style={{ padding: "10px 8px", borderBottom: "1px solid rgba(var(--border),0.5)" }}>
+                            {t?.providerRefId || t?.providerReference || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

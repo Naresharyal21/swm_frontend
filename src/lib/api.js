@@ -72,21 +72,12 @@ async function tryRefresh() {
 
 // Optional helper you can reuse in UI toast messages
 export function getErrorMessage(e, fallback = 'Request failed') {
-  return (
-    e?.response?.data?.message ||
-    e?.response?.data?.error ||
-    e?.message ||
-    fallback
-  )
+  return e?.response?.data?.message || e?.response?.data?.error || e?.message || fallback
 }
 
 function isAxiosCanceled(error) {
   // Covers axios cancel tokens + AbortController cancellations
-  return (
-    axios.isCancel?.(error) ||
-    error?.code === 'ERR_CANCELED' ||
-    error?.message === 'canceled'
-  )
+  return axios.isCancel?.(error) || error?.code === 'ERR_CANCELED' || error?.message === 'canceled'
 }
 
 // -------------------------
@@ -100,7 +91,6 @@ api.interceptors.response.use(
 
     const original = error?.config
     const status = error?.response?.status
-
     if (!original) return Promise.reject(error)
 
     const url = String(original?.url || '')
@@ -114,9 +104,9 @@ api.interceptors.response.use(
       url.includes('/auth/verify-otp') ||
       url.includes('/auth/reset-password')
 
-    // ✅ role removed / permission denied => logout immediately (not for auth endpoints)
+    // ✅ 403 = forbidden (DO NOT LOGOUT)
+    // Supervisor may hit Admin-only endpoints; show message in UI instead of forcing logout.
     if (status === 403 && !url.includes('/auth/')) {
-      forceLogout('403_forbidden')
       return Promise.reject(error)
     }
 

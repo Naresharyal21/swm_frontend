@@ -12,7 +12,7 @@ export const sdk = {
     // Forgot password (OTP flow)
     forgotPassword: (payload) => api.post('/auth/forgot-password', payload).then(unwrap),
     verifyOtp: (payload) => api.post('/auth/verify-otp', payload).then(unwrap),
-    resetPassword: (payload) => api.post('/auth/reset-password', payload).then(unwrap)
+    resetPassword: (payload) => api.post('/auth/reset-password', payload).then(unwrap),
   },
 
   admin: {
@@ -75,16 +75,16 @@ export const sdk = {
     getRewardRateById: (id) => api.get(`/admin/reward-rates/${id}`).then(unwrap),
     createRewardRate: (payload) => api.post('/admin/reward-rates', payload).then(unwrap),
     updateRewardRate: (id, payload) => api.put(`/admin/reward-rates/${id}`, payload).then(unwrap),
-    deleteRewardRate: (id) => api.delete(`/admin/reward-rates/${id}`).then(unwrap)
+    deleteRewardRate: (id) => api.delete(`/admin/reward-rates/${id}`).then(unwrap),
   },
 
   iot: {
     ingestTelemetry: (payload, { iotKey } = {}) =>
       api
         .post('/iot/telemetry', payload, {
-          headers: iotKey ? { 'x-iot-key': iotKey } : undefined
+          headers: iotKey ? { 'x-iot-key': iotKey } : undefined,
         })
-        .then(unwrap)
+        .then(unwrap),
   },
 
   ops: {
@@ -107,7 +107,7 @@ export const sdk = {
     rejectRewardClaim: (id, payload) => api.post(`/ops/reward-claims/${id}/reject`, payload).then(unwrap),
 
     generateInvoices: (payload) => api.post('/ops/billing/generate', payload).then(unwrap),
-    postVehicleLocation: (vehicleId, payload) => api.post(`/ops/vehicles/${vehicleId}/location`, payload).then(unwrap)
+    postVehicleLocation: (vehicleId, payload) => api.post(`/ops/vehicles/${vehicleId}/location`, payload).then(unwrap),
   },
 
   crew: {
@@ -119,9 +119,7 @@ export const sdk = {
       const fd = new FormData()
       fd.append('file', file)
       return api
-        .post(`/crew/tasks/${id}/proof`, fd, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        })
+        .post(`/crew/tasks/${id}/proof`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then(unwrap)
     },
 
@@ -129,7 +127,7 @@ export const sdk = {
     rejectRecyclable: (id, payload) => api.post(`/crew/recyclables/${id}/reject`, payload).then(unwrap),
 
     listExceptions: (params) => api.get('/crew/exceptions', { params }).then(unwrap),
-    createException: (payload) => api.post('/crew/exceptions', payload).then(unwrap)
+    createException: (payload) => api.post('/crew/exceptions', payload).then(unwrap),
   },
 
   citizen: {
@@ -153,7 +151,8 @@ export const sdk = {
     initiateBulky: (planId) => api.post('/payments/esewa/initiate', { planId, kind: 'BULKY' }).then(unwrap),
     esewaStatus: (txUuid) => api.get(`/payments/esewa/status/${txUuid}`).then(unwrap),
 
-    updateHouseholdPlan: (householdId, payload) => api.put(`/citizen/households/${householdId}/plan`, payload).then(unwrap),
+    updateHouseholdPlan: (householdId, payload) =>
+      api.put(`/citizen/households/${householdId}/plan`, payload).then(unwrap),
     updatePickupSchedule: (householdId, payload) =>
       api.put(`/citizen/households/${householdId}/pickup-schedule`, payload).then(unwrap),
 
@@ -173,9 +172,7 @@ export const sdk = {
       ;(files || []).forEach((f) => fd.append('files', f))
 
       return api
-        .post('/citizen/recyclables/submissions', fd, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        })
+        .post('/citizen/recyclables/submissions', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
         .then(unwrap)
     },
 
@@ -188,6 +185,6 @@ export const sdk = {
     markAllNotificationsRead: () => api.post('/citizen/notifications/read-all', {}).then(unwrap),
 
     // Invoices
-    payInvoice: (invoiceId, payload) => api.post(`/citizen/invoices/${invoiceId}/pay`, payload).then(unwrap)
-  }
+    payInvoice: (invoiceId, payload) => api.post(`/citizen/invoices/${invoiceId}/pay`, payload).then(unwrap),
+  },
 }
