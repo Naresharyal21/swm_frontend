@@ -57,7 +57,7 @@ function EsewaPayButton({ disabled, loading, onClick, label }) {
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="primary"
       disabled={disabled}
       onClick={onClick}
       className="h-auto w-full px-3 py-3"

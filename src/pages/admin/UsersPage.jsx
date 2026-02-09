@@ -163,7 +163,7 @@ export default function UsersPage() {
 
 
                       <Button
-                        variant="destructive"
+                        variant="danger"
                         disabled={del.isPending}
                         onClick={() => {
                           if (confirm(`Delete user ${u.email}?`)) del.mutate(u._id || u.id)

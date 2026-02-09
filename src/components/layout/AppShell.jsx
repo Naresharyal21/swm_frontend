@@ -94,25 +94,27 @@ function getNav(role) {
     ];
   }
 
-  // CITIZEN (default)
+  // CITIZEN (default) — reordered as you requested
   return [
     ...base,
     group("Citizen", [
-      { label: "Wallet", to: "/app/citizen/wallet", icon: Wallet },
-      { label: "Invoices", to: "/app/citizen/invoices", icon: FileText },
-      { label: "Billing Plans", to: "/app/citizen/billing-plans", icon: CreditCard },
+      { label: "Notifications", to: "/app/citizen/notifications", icon: Bell },
       { label: "Household Settings", to: "/app/citizen/household-settings", icon: Settings },
       { label: "Collection Schedule", to: "/app/citizen/schedule", icon: RouteIcon },
-      { label: "Membership", to: "/app/citizen/membership", icon: Sparkles },
-      { label: "Litter Report", to: "/app/citizen/litter-report", icon: Trash2 },
+      { label: "My Cases", to: "/app/citizen/my-cases", icon: ClipboardList },
+      { label: "Recyclables", to: "/app/citizen/recyclables", icon: Leaf },
       { label: "Bulky Request", to: "/app/citizen/bulky-request", icon: Truck },
       { label: "Missed Pickup", to: "/app/citizen/missed-pickup", icon: ClipboardList },
-      { label: "My Cases", to: "/app/citizen/my-cases", icon: ClipboardList },
-      { label: "Reward Claim", to: "/app/citizen/reward-claim", icon: BadgeDollarSign },
-      { label: "Recyclables", to: "/app/citizen/recyclables", icon: Leaf },
-      { label: "Notifications", to: "/app/citizen/notifications", icon: Bell },
+      { label: "Litter Report", to: "/app/citizen/litter-report", icon: Trash2 },
 
-      // ✅ NEW
+      // Billing components right after Recyclables (you don't have a single /billing route here)
+      { label: "Wallet", to: "/app/citizen/wallet", icon: Wallet },
+      { label: "Billing Plans", to: "/app/citizen/billing-plans", icon: CreditCard },
+      { label: "Invoices", to: "/app/citizen/invoices", icon: FileText },
+      { label: "Membership", to: "/app/citizen/membership", icon: Sparkles },
+
+      // Other components later
+      { label: "Reward Claim", to: "/app/citizen/reward-claim", icon: BadgeDollarSign },
       { label: "Contact & Feedback", to: "/app/citizen/contact-feedback", icon: FileText },
     ]),
   ];
@@ -173,36 +175,39 @@ function SideNav({ role, onNavigate }) {
                       cn(
                         "group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all",
                         "pl-4",
-                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950",
+                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950",
                         isActive
-                          ? "bg-[rgba(var(--brand),0.14)] text-[rgb(var(--brand))] shadow-sm"
+                          ? "bg-green-200 text-black shadow-sm"
                           : "text-app hover:bg-black/5 dark:hover:bg-white/5"
                       )
                     }
                   >
                     {({ isActive }) => (
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          "absolute left-1 top-1/2 -translate-y-1/2 h-6 w-[3px] rounded-full transition-opacity",
-                          "bg-[rgb(var(--brand))]",
-                          isActive ? "opacity-100" : "opacity-0 group-hover:opacity-40"
-                        )}
-                      />
+                      <>
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "absolute left-1 top-1/2 -translate-y-1/2 h-6 w-[3px] rounded-full transition-opacity",
+                            "bg-purple-800",
+                            isActive ? "opacity-100" : "opacity-0 group-hover:opacity-40"
+                          )}
+                        />
+
+                        <div
+                          className={cn(
+                            "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+                            isActive
+                              ? "bg-white/15"
+                              : "bg-black/5 dark:bg-white/5 group-hover:bg-black/10 dark:group-hover:bg-white/10"
+                          )}
+                        >
+                          <Icon className={cn("h-4 w-4", isActive ? "text-black" : "")} />
+                        </div>
+
+                        <span className="flex-1">{it.label}</span>
+                        <ChevronRight className="h-4 w-4 opacity-0 group-hover:opacity-70 transition-opacity" />
+                      </>
                     )}
-
-                    <div
-                      className={cn(
-                        "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
-                        "bg-black/5 dark:bg-white/5",
-                        "group-hover:bg-black/10 dark:group-hover:bg-white/10"
-                      )}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </div>
-
-                    <span className="flex-1">{it.label}</span>
-                    <ChevronRight className="h-4 w-4 opacity-0 group-hover:opacity-70 transition-opacity" />
                   </NavLink>
                 );
               })}
@@ -290,6 +295,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-app text-app">
       <div className="mx-auto flex max-w-[1400px]">
+        {/* Desktop sidebar: default background */}
         <aside className="hidden h-screen w-72 shrink-0 border-r border-app lg:block">
           <SideNav role={role} />
         </aside>
@@ -297,6 +303,7 @@ export function AppShell() {
         <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 bg-black/40 lg:hidden" onClick={() => setMobileOpen(false)} />
+            {/* Mobile sidebar: keep your original drawer background */}
             <Dialog.Content className="fixed left-0 top-0 h-full w-[85vw] max-w-xs border-r border-app bg-[rgb(var(--card))] shadow-soft lg:hidden">
               <SideNav role={role} onNavigate={() => setMobileOpen(false)} />
             </Dialog.Content>

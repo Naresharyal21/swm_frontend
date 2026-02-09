@@ -13,8 +13,13 @@ export const sdk = {
     forgotPassword: (payload) => api.post('/auth/forgot-password', payload).then(unwrap),
     verifyOtp: (payload) => api.post('/auth/verify-otp', payload).then(unwrap),
     resetPassword: (payload) => api.post('/auth/reset-password', payload).then(unwrap),
-  },
+  
 
+    // ✅ Signup OTP flow (ADD THESE)
+    signupRequestOtp: (payload) => api.post('/auth/signup/request-otp', payload).then(unwrap),
+    signupVerifyOtp: (payload) => api.post('/auth/signup/verify-otp', payload).then(unwrap),
+    signupCancel: (payload) => api.post('/auth/signup/cancel', payload).then(unwrap),
+  },
   admin: {
     // Users
     listUsers: (params) => api.get('/admin/users', { params }).then(unwrap),
