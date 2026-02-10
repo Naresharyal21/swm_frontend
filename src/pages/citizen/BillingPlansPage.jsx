@@ -28,7 +28,7 @@ function startEsewaPayment(data) {
 }
 
 // -------------------------
-// Transactions (for blocking COMPLETE only)
+// Transactions (Option A: per-household blocking)
 // -------------------------
 async function fetchTransactions() {
   const res = await api.get("/citizen/transactions");
@@ -45,7 +45,12 @@ function normalizeStatus(v) {
 function isComplete(tx) {
   return normalizeStatus(tx?.status) === "COMPLETE";
 }
-
+function txKind(tx) {
+  return String(tx?.kind || "").trim().toUpperCase();
+}
+function txHouseholdId(tx) {
+  return tx?.householdId?._id || tx?.householdId || null;
+}
 function keyYM(year, month1to12) {
   return `${year}-${String(month1to12).padStart(2, "0")}`;
 }
@@ -61,7 +66,7 @@ function EsewaPayButton({ disabled, loading, onClick, label }) {
       disabled={disabled}
       onClick={onClick}
       className="h-auto w-full px-3 py-3"
-      title={disabled ? "Not available / already paid" : ""}
+      title={disabled ? "Not available / already paid / select household" : ""}
     >
       <div className="flex flex-col items-center justify-center gap-1 leading-tight">
         <div className="text-[11px] font-semibold">{loading ? "Starting…" : label}</div>
@@ -97,6 +102,14 @@ export default function BillingPlansPage() {
   // ✅ tabs: "monthly" | "annual"
   const [tab, setTab] = React.useState("monthly");
 
+  // ✅ Option A: household selection required for MONTHLY/ANNUAL
+  const qHouseholds = useQuery({
+    queryKey: ["citizen_my_households"],
+    queryFn: () => sdk.citizen.getMyHouseholds(),
+  });
+  const households = qHouseholds.data?.items || [];
+  const [householdId, setHouseholdId] = React.useState("");
+
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
@@ -114,12 +127,22 @@ export default function BillingPlansPage() {
   });
   const txs = Array.isArray(qTx.data) ? qTx.data : [];
 
-  // Build "paid markers" from COMPLETE only
+  const hasHouseholdSelected = !!householdId;
+
+  // -------------------------
+  // ✅ Paid markers are per-household (Option A)
+  // -------------------------
   const paidMonthlyThisMonth = React.useMemo(() => {
+    if (!householdId) return false;
+
     const k = keyYM(year, month);
+
     for (const t of txs) {
       if (!isComplete(t)) continue;
-      if (String(t?.kind || "").toUpperCase() !== "MONTHLY") continue;
+      if (txKind(t) !== "MONTHLY") continue;
+
+      const hid = txHouseholdId(t);
+      if (String(hid || "") !== String(householdId)) continue;
 
       if (Number.isFinite(t?.targetYear) && Number.isFinite(t?.targetMonth)) {
         if (keyYM(Number(t.targetYear), Number(t.targetMonth)) === k) return true;
@@ -128,13 +151,19 @@ export default function BillingPlansPage() {
         if (!Number.isNaN(d.getTime()) && keyYM(d.getFullYear(), d.getMonth() + 1) === k) return true;
       }
     }
+
     return false;
-  }, [txs, year, month]);
+  }, [txs, year, month, householdId]);
 
   const paidAnnualThisYear = React.useMemo(() => {
+    if (!householdId) return false;
+
     for (const t of txs) {
       if (!isComplete(t)) continue;
-      if (String(t?.kind || "").toUpperCase() !== "ANNUAL") continue;
+      if (txKind(t) !== "ANNUAL") continue;
+
+      const hid = txHouseholdId(t);
+      if (String(hid || "") !== String(householdId)) continue;
 
       if (Number.isFinite(t?.targetYear)) {
         if (Number(t.targetYear) === year) return true;
@@ -143,15 +172,18 @@ export default function BillingPlansPage() {
         if (!Number.isNaN(d.getTime()) && d.getFullYear() === year) return true;
       }
     }
+
     return false;
-  }, [txs, year]);
+  }, [txs, year, householdId]);
 
   const [pendingKey, setPendingKey] = React.useState("");
 
   const pay = useMutation({
     mutationFn: ({ planId, kind }) => {
-      if (kind === "MONTHLY") return sdk.citizen.initiateEsewa({ planId, kind, year, month });
-      if (kind === "ANNUAL") return sdk.citizen.initiateEsewa({ planId, kind, year });
+      // ✅ Option A: send householdId for MONTHLY/ANNUAL
+      if (kind === "MONTHLY") return sdk.citizen.initiateEsewa({ planId, kind, year, month, householdId });
+      if (kind === "ANNUAL") return sdk.citizen.initiateEsewa({ planId, kind, year, householdId });
+      // DAILY/BULKY: keep as-is (householdId optional)
       return sdk.citizen.initiateEsewa({ planId, kind });
     },
     onSuccess: (data) => {
@@ -165,6 +197,11 @@ export default function BillingPlansPage() {
   });
 
   const handlePay = (planId, kind) => {
+    // ✅ guard: require household for MONTHLY/ANNUAL so backend won't reject
+    if ((kind === "MONTHLY" || kind === "ANNUAL") && !householdId) {
+      toast.error("Select a household first (required for Monthly/Annual).");
+      return;
+    }
     const key = `${planId}:${kind}`;
     setPendingKey(key);
     pay.mutate({ planId, kind });
@@ -175,8 +212,7 @@ export default function BillingPlansPage() {
     return (Array.isArray(plans) ? plans : []).filter((p) => {
       const monthlyFee = Number(p?.monthlyFee || 0);
       const dailyFee = Number(p?.dailyPickupFee || 0);
-      const bulkyFee =
-        p?.bulkyDailyChargeOverride == null ? 0 : Number(p?.bulkyDailyChargeOverride || 0);
+      const bulkyFee = p?.bulkyDailyChargeOverride == null ? 0 : Number(p?.bulkyDailyChargeOverride || 0);
       return monthlyFee > 0 || dailyFee > 0 || bulkyFee > 0;
     });
   }, [plans]);
@@ -215,6 +251,44 @@ export default function BillingPlansPage() {
     <div className="space-y-6">
       <PageHeader title="Billing Plans" subtitle="Choose what you want to pay via eSewa." />
 
+      {/* ✅ Household selector (required for Monthly/Annual - Option A) */}
+      <Card>
+        <CardContent className="p-5 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">Select household (required for Monthly/Annual)</div>
+              <div className="text-xs text-muted mt-1">
+                Payment will be linked to this household so the correct bin can be activated after payment.
+              </div>
+            </div>
+            <Badge variant={hasHouseholdSelected ? "success" : "secondary"}>
+              {hasHouseholdSelected ? "SELECTED" : "REQUIRED"}
+            </Badge>
+          </div>
+
+          <select
+            value={householdId}
+            onChange={(e) => setHouseholdId(e.target.value)}
+            className="w-full rounded-xl border border-app bg-transparent px-3 py-2 text-sm"
+          >
+            <option value="">
+              {qHouseholds.isLoading ? "Loading households..." : "Select household"}
+            </option>
+            {households.map((h) => (
+              <option key={h._id || h.id} value={h._id || h.id}>
+                {h.address || (h._id || h.id)}
+              </option>
+            ))}
+          </select>
+
+          {!hasHouseholdSelected ? (
+            <div className="text-xs text-muted">
+              * Monthly/Annual payment buttons will stay disabled until you select a household.
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
       {/* Tabs */}
       <div className="flex gap-2">
         <Button variant={tab === "monthly" ? "default" : "outline"} onClick={() => setTab("monthly")}>
@@ -234,10 +308,13 @@ export default function BillingPlansPage() {
               <span className="font-semibold">
                 {year}-{String(month).padStart(2, "0")}
               </span>
+
               <div className="mt-1">
-                Monthly status:{" "}
+                Monthly status (selected household):{" "}
                 <span className="font-semibold">
-                  {paidAnnualThisYear
+                  {!hasHouseholdSelected
+                    ? "Select household"
+                    : paidAnnualThisYear
                     ? "Covered by ANNUAL (COMPLETE)"
                     : paidMonthlyThisMonth
                     ? "Paid (COMPLETE)"
@@ -259,8 +336,7 @@ export default function BillingPlansPage() {
 
                 const monthlyFee = Number(p.monthlyFee || 0);
                 const dailyFee = Number(p.dailyPickupFee || 0);
-                const bulkyFee =
-                  p.bulkyDailyChargeOverride == null ? 0 : Number(p.bulkyDailyChargeOverride || 0);
+                const bulkyFee = p.bulkyDailyChargeOverride == null ? 0 : Number(p?.bulkyDailyChargeOverride || 0);
 
                 const canMonthly = monthlyFee > 0;
                 const canDaily = dailyFee > 0;
@@ -268,8 +344,8 @@ export default function BillingPlansPage() {
 
                 const disabledBase = pay.isPending || p.isActive === false;
 
-                // Block MONTHLY if annual complete or monthly paid
-                const blockMonthly = paidAnnualThisYear || paidMonthlyThisMonth;
+                // ✅ Block MONTHLY if annual complete or monthly paid (per household)
+                const blockMonthly = hasHouseholdSelected ? (paidAnnualThisYear || paidMonthlyThisMonth) : false;
 
                 const isMonthlyPending = pendingKey === `${id}:MONTHLY`;
                 const isDailyPending = pendingKey === `${id}:DAILY`;
@@ -281,9 +357,7 @@ export default function BillingPlansPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="text-base font-semibold">{p.name}</div>
-                          <div className="mt-1 text-xs text-muted">
-                            Monthly tab: Annual is hidden here.
-                          </div>
+                          <div className="mt-1 text-xs text-muted">Monthly tab: Annual is hidden here.</div>
                         </div>
 
                         <Badge variant={p.isActive === false ? "secondary" : "success"}>
@@ -297,7 +371,12 @@ export default function BillingPlansPage() {
                           subtitle={`Subscription fee for ${year}-${String(month).padStart(2, "0")}`}
                           price={monthlyFee}
                           badge={{ text: "MONTHLY", variant: "success" }}
-                          disabled={disabledBase || !canMonthly || blockMonthly}
+                          disabled={
+                            disabledBase ||
+                            !canMonthly ||
+                            !hasHouseholdSelected || // ✅ require household
+                            blockMonthly
+                          }
                           loading={isMonthlyPending}
                           onPay={() => handlePay(id, "MONTHLY")}
                         />
@@ -323,12 +402,16 @@ export default function BillingPlansPage() {
                         />
                       </div>
 
-                      {blockMonthly && (
+                      {!hasHouseholdSelected ? (
+                        <div className="text-xs text-muted">
+                          * Select a household to pay MONTHLY (required in Option A).
+                        </div>
+                      ) : blockMonthly ? (
                         <div className="text-xs text-muted">
                           * Monthly is blocked because there is a <b>COMPLETE</b> annual payment this year
-                          or a <b>COMPLETE</b> monthly payment this month.
+                          or a <b>COMPLETE</b> monthly payment this month (for this household).
                         </div>
-                      )}
+                      ) : null}
                     </CardContent>
                   </Card>
                 );
@@ -342,10 +425,7 @@ export default function BillingPlansPage() {
       {tab === "annual" && (
         <>
           {!annualPlan ? (
-            <EmptyState
-              title="No annual plan available"
-              description="Ask admin to set annualFee for an active plan."
-            />
+            <EmptyState title="No annual plan available" description="Ask admin to set annualFee for an active plan." />
           ) : (
             (() => {
               const p = annualPlan;
@@ -356,7 +436,8 @@ export default function BillingPlansPage() {
 
               const disabledBase = pay.isPending || p.isActive === false;
 
-              const blockAnnual = paidAnnualThisYear;
+              // ✅ block annual per household
+              const blockAnnual = hasHouseholdSelected ? paidAnnualThisYear : false;
 
               const isAnnualPending = pendingKey === `${id}:ANNUAL`;
 
@@ -366,9 +447,7 @@ export default function BillingPlansPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-base font-semibold">{p.name}</div>
-                        <div className="mt-1 text-xs text-muted">
-                          Annual tab: showing only one annual plan.
-                        </div>
+                        <div className="mt-1 text-xs text-muted">Annual tab: showing only one annual plan.</div>
                       </div>
 
                       <Badge variant={p.isActive === false ? "secondary" : "success"}>
@@ -382,18 +461,27 @@ export default function BillingPlansPage() {
                         subtitle={`Subscription fee for year ${year}`}
                         price={annualFee}
                         badge={{ text: "ANNUAL", variant: "warning" }}
-                        disabled={disabledBase || !canAnnual || blockAnnual}
+                        disabled={
+                          disabledBase ||
+                          !canAnnual ||
+                          !hasHouseholdSelected || // ✅ require household
+                          blockAnnual
+                        }
                         loading={isAnnualPending}
                         onPay={() => handlePay(id, "ANNUAL")}
                       />
                     </div>
 
-                    {blockAnnual && (
+                    {!hasHouseholdSelected ? (
                       <div className="text-xs text-muted">
-                        * Annual is blocked because there is already a <b>COMPLETE</b> annual payment for
-                        this year.
+                        * Select a household to pay ANNUAL (required in Option A).
                       </div>
-                    )}
+                    ) : blockAnnual ? (
+                      <div className="text-xs text-muted">
+                        * Annual is blocked because there is already a <b>COMPLETE</b> annual payment for this year
+                        (for this household).
+                      </div>
+                    ) : null}
                   </CardContent>
                 </Card>
               );
