@@ -9,6 +9,9 @@ import { Card, CardContent, CardHeader } from "../ui/card";
 import { Button } from "../ui/button";
 import { sdk } from "../../lib/sdk";
 
+const zoomNormal = 16;      // dashboard zoom OUT
+const zoomFullscreen = 16;  // fullscreen zoom IN
+
 /* ---------------------------------
    Helpers
 --------------------------------- */
@@ -17,12 +20,6 @@ function toNum(x) {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Supports:
- * - location.coordinates = [lng, lat] (GeoJSON)
- * - geo/point/position coordinates
- * - lat/lng fields
- */
 function getLatLngFromBin(b) {
   const c1 = b?.location?.coordinates;
   if (Array.isArray(c1) && c1.length >= 2) {
@@ -45,42 +42,104 @@ function getLatLngFromBin(b) {
   return null;
 }
 
-/**
- * Heatmap weight:
- * - ensure non-zero base so points are visible even at 0% fill
- * - keep within [0,1]
- */
 function intensityForBin(b) {
   const fill = Math.min(Math.max(Number(b?.fillPercent ?? 0) / 100, 0), 1);
   const offlineBoost = b?.isOffline ? 0.25 : 0;
   const lowBatteryBoost = Number(b?.batteryPercent ?? 100) < 20 ? 0.15 : 0;
-
-  const base = 0.2; // ✅ key for visibility
+  const base = 0.2;
   return Math.min(base + fill + offlineBoost + lowBatteryBoost, 1);
 }
 
 /**
- * Fit map to points once we have them (and after size changes).
- * Works without importing leaflet (uses react-leaflet map API).
+ * Fit map to points when enabled (ONLY once)
+ * points = array of [lat, lng]
  */
-function FitToPoints({ points, enabled = true }) {
+function FitToPoints({ points, enabled = true, padding = [30, 30] }) {
   const map = useMap();
 
   React.useEffect(() => {
     if (!enabled) return;
     if (!points?.length) return;
 
-    const latLngs = points.map((p) => [p[0], p[1]]);
-    // If only 1 point, use setView instead of fitBounds (better UX)
-    if (latLngs.length === 1) {
-      map.setView(latLngs[0], Math.max(map.getZoom?.() || 13, 14));
+    if (points.length === 1) {
+      map.setView(points[0], Math.max(map.getZoom?.() || 1, 16), { animate: false });
       return;
     }
-    map.fitBounds(latLngs, { padding: [30, 30] });
-  }, [map, points, enabled]);
+
+    map.fitBounds(points, { padding });
+  }, [map, points, enabled, padding]);
 
   return null;
 }
+
+/**
+ * Sync center+zoom together (prevents zoom being overridden after refresh)
+ */
+function SyncView({ center, zoom }) {
+  const map = useMap();
+
+  React.useEffect(() => {
+    if (!center || !Array.isArray(center) || center.length < 2) return;
+    if (!Number.isFinite(zoom)) return;
+    map.setView(center, zoom, { animate: false });
+  }, [map, center, zoom]);
+
+  return null;
+}
+
+/* ---------------------------------
+   Stable Map Component
+--------------------------------- */
+const MapBlock = React.memo(function MapBlock({
+  heightClass,
+  center,
+  zoom,
+  fitPoints,
+  heatPoints,
+  heatOptions,
+  markerPoints,
+  onMapCreated,
+  enableFit,
+  enableSyncView,
+}) {
+  return (
+    <div className={`relative z-0 rounded-2xl overflow-hidden border border-[rgb(var(--border))] w-full ${heightClass}`}>
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        style={{ height: "100%", width: "100%" }}
+        whenCreated={onMapCreated}
+      >
+        {/* ✅ FIXED: removed extra '}' */}
+        <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+        <FitToPoints points={fitPoints} enabled={enableFit} />
+        {enableSyncView ? <SyncView center={center} zoom={zoom} /> : null}
+
+        <HeatmapLayer points={heatPoints} options={heatOptions} />
+
+        {markerPoints.map((p) => (
+          <CircleMarker key={p.id} center={[p.lat, p.lng]} radius={7} pathOptions={{ weight: 2 }}>
+            <Popup>
+              <div style={{ fontSize: 12, lineHeight: 1.35 }}>
+                <div><b>Bin</b></div>
+                <div>ID: {p.bin?.binId || p.bin?._id}</div>
+                <div>{p.lat.toFixed(6)}, {p.lng.toFixed(6)}</div>
+                <div>Status: {p.bin?.status || "-"}</div>
+                <div>Fill: {p.bin?.fillPercent ?? "-"}%</div>
+                <div>Battery: {p.bin?.batteryPercent ?? "-"}%</div>
+              </div>
+            </Popup>
+          </CircleMarker>
+        ))}
+      </MapContainer>
+
+      <div className="absolute left-3 bottom-3 z-[500] rounded-lg bg-black/70 text-white text-xs px-2 py-1">
+        active bins: {markerPoints.length} | heat: {heatPoints.length}
+      </div>
+    </div>
+  );
+});
 
 /* ---------------------------------
    Component
@@ -93,22 +152,31 @@ export default function AdminBinsHeatmapCard() {
   const mapRef = React.useRef(null);
   const abortRef = React.useRef(null);
 
+  // fit only once
+  const didFitRef = React.useRef(false);
+
+  // lock center so polling doesn't change it
+  const [centerState, setCenterState] = React.useState([27.7172, 85.324]);
+  const centerLockedRef = React.useRef(false);
+
   const load = React.useCallback(async () => {
-    // cancel any in-flight request (prevents race conditions)
     try {
       abortRef.current?.abort?.();
     } catch {}
+
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
       setLoading(true);
-      const res = await sdk.admin.listBins({ limit: 500, signal: controller.signal });
-      const items = res?.items || [];
-      setBins(items);
+      const res = await sdk.admin.listBins({
+        limit: 500,
+        onlyActive: true,
+        signal: controller.signal,
+      });
+      setBins(res?.items || []);
     } catch (e) {
-      // ignore abort errors
-      const msg = e?.name === "AbortError" ? null : (e?.response?.data?.message || e?.message);
+      const msg = e?.name === "AbortError" ? null : e?.response?.data?.message || e?.message;
       if (msg) toast.error(msg || "Failed to load bins");
     } finally {
       setLoading(false);
@@ -124,7 +192,11 @@ export default function AdminBinsHeatmapCard() {
     };
   }, [load]);
 
-  // Prevent background scroll in fullscreen
+  React.useEffect(() => {
+    const id = setInterval(() => load(), 4000);
+    return () => clearInterval(id);
+  }, [load]);
+
   React.useEffect(() => {
     if (!isFullscreen) return;
     const prev = document.body.style.overflow;
@@ -134,7 +206,6 @@ export default function AdminBinsHeatmapCard() {
     };
   }, [isFullscreen]);
 
-  // Recompute map size after fullscreen toggle
   React.useEffect(() => {
     const t = setTimeout(() => {
       mapRef.current?.invalidateSize?.();
@@ -142,70 +213,50 @@ export default function AdminBinsHeatmapCard() {
     return () => clearTimeout(t);
   }, [isFullscreen]);
 
-  const { points, center } = React.useMemo(() => {
-    const pts = (bins || [])
+  const heatPoints = React.useMemo(() => {
+    return (bins || [])
       .map((b) => {
         const ll = getLatLngFromBin(b);
         if (!ll) return null;
         return [ll.lat, ll.lng, intensityForBin(b)];
       })
       .filter(Boolean);
-
-    const c = pts.length ? [pts[0][0], pts[0][1]] : [27.7172, 85.324];
-    return { points: pts, center: c };
   }, [bins]);
 
-  // Heatmap options: make it more visible when bins are few
+  const fitPoints = React.useMemo(() => heatPoints.map((p) => [p[0], p[1]]), [heatPoints]);
+
+  const markerPoints = React.useMemo(() => {
+    return (bins || [])
+      .map((b) => {
+        const ll = getLatLngFromBin(b);
+        if (!ll) return null;
+        return { id: String(b?._id || b?.binId || `${ll.lat},${ll.lng}`), lat: ll.lat, lng: ll.lng, bin: b };
+      })
+      .filter(Boolean);
+  }, [bins]);
+
+  // set center only once when first data arrives
+  React.useEffect(() => {
+    if (centerLockedRef.current) return;
+    if (!fitPoints.length) return;
+    setCenterState(fitPoints[0]);
+    centerLockedRef.current = true;
+  }, [fitPoints]);
+
   const heatOptions = React.useMemo(() => {
-    const few = points.length && points.length <= 20;
-    return {
-      radius: few ? 50 : 28,
-      blur: few ? 30 : 18,
-      maxZoom: 18,
-    };
-  }, [points.length]);
+    const few = heatPoints.length && heatPoints.length <= 20;
+    return { radius: few ? 50 : 28, blur: few ? 30 : 18, maxZoom: 18 };
+  }, [heatPoints.length]);
 
-  const MapBlock = React.useCallback(
-    ({ heightClass }) => (
-      <div className={`relative z-0 rounded-2xl overflow-hidden border border-[rgb(var(--border))] w-full ${heightClass}`}>
-        <MapContainer
-          center={center}
-          zoom={13}
-          style={{ height: "100%", width: "100%" }}
-          whenCreated={(m) => {
-            mapRef.current = m;
-          }}
-        >
-          <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+  const enableFit = React.useMemo(() => {
+    if (didFitRef.current) return false;
+    if (!fitPoints.length) return false;
+    return true;
+  }, [fitPoints.length]);
 
-          {/* Zoom to bins automatically */}
-          <FitToPoints points={points} enabled />
-
-          {/* Heatmap */}
-          <HeatmapLayer points={points} options={heatOptions} />
-
-          {/* Always-visible bin dots (so "bins are visible" even with low intensity) */}
-          {points.map((p, i) => (
-            <CircleMarker key={i} center={[p[0], p[1]]} radius={7} pathOptions={{ weight: 2 }}>
-              <Popup>
-                <div style={{ fontSize: 12, lineHeight: 1.35 }}>
-                  <div><b>Bin</b></div>
-                  <div>{p[0].toFixed(6)}, {p[1].toFixed(6)}</div>
-                  <div>Weight: {Number(p[2]).toFixed(2)}</div>
-                </div>
-              </Popup>
-            </CircleMarker>
-          ))}
-        </MapContainer>
-
-        {/* Small status badge */}
-        <div className="absolute left-3 bottom-3 z-[500] rounded-lg bg-black/70 text-white text-xs px-2 py-1">
-          bins: {bins.length} | plotted: {points.length}
-        </div>
-      </div>
-    ),
-    [bins.length, center, heatOptions, points]
-  );
+  React.useEffect(() => {
+    if (enableFit) didFitRef.current = true;
+  }, [enableFit]);
 
   return (
     <>
@@ -227,9 +278,18 @@ export default function AdminBinsHeatmapCard() {
         </CardHeader>
 
         <CardContent>
-          {/* Normal view height (85vh is heavy; 60vh is smoother on dashboards.
-              Keep your 85vh if you want. */}
-          <MapBlock heightClass="h-[60vh]" />
+          <MapBlock
+            heightClass="h-[60vh]"
+            center={centerState}
+            zoom={zoomNormal}
+            fitPoints={fitPoints}
+            heatPoints={heatPoints}
+            heatOptions={heatOptions}
+            markerPoints={markerPoints}
+            onMapCreated={(m) => (mapRef.current = m)}
+            enableFit={false}
+            enableSyncView={true}
+          />
         </CardContent>
       </Card>
 
@@ -250,16 +310,23 @@ export default function AdminBinsHeatmapCard() {
               </div>
 
               <div className="h-[calc(100%-52px)]">
-                <MapBlock heightClass="h-full" />
+                <MapBlock
+                  heightClass="h-full"
+                  center={centerState}
+                  zoom={zoomFullscreen}
+                  fitPoints={fitPoints}
+                  heatPoints={heatPoints}
+                  heatOptions={heatOptions}
+                  markerPoints={markerPoints}
+                  onMapCreated={(m) => (mapRef.current = m)}
+                  enableFit={false}
+                  enableSyncView={true}
+                />
               </div>
             </div>
           </div>
 
-          <button
-            aria-label="Close fullscreen"
-            className="absolute inset-0 -z-10"
-            onClick={() => setIsFullscreen(false)}
-          />
+          <button aria-label="Close fullscreen" className="absolute inset-0 -z-10" onClick={() => setIsFullscreen(false)} />
         </div>
       )}
     </>
