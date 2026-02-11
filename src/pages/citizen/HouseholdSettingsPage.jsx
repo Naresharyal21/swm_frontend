@@ -343,8 +343,8 @@ export default function HouseholdSettingsPage() {
           {/* Address + BinId (UPDATED) */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <Label>Address *</Label>
-              <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="House address" />
+              <Label>Household Name *</Label>
+              <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="e.g myhome01 " />
             </div>
 
             <div className="space-y-2">
@@ -477,7 +477,7 @@ export default function HouseholdSettingsPage() {
             <Table>
               <THead>
                 <tr>
-                  <TH>Address</TH>
+                  <TH>Household Name</TH>
                   <TH>Zone</TH>
                   <TH>Status</TH>
                   <TH>Created</TH>
