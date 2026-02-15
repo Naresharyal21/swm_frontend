@@ -1,16 +1,17 @@
 // src/components/admin/AdminBinsHeatmapCard.jsx
 import React from "react";
 import toast from "react-hot-toast";
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import L from "leaflet";
 
 import HeatmapLayer from "../maps/HeatmapLayer";
 import { Card, CardContent, CardHeader } from "../ui/card";
 import { Button } from "../ui/button";
 import { sdk } from "../../lib/sdk";
 
-const zoomNormal = 16;      // dashboard zoom OUT
-const zoomFullscreen = 16;  // fullscreen zoom IN
+const zoomNormal = 16; // dashboard zoom
+const zoomFullscreen = 16; // fullscreen zoom
 
 /* ---------------------------------
    Helpers
@@ -48,6 +49,69 @@ function intensityForBin(b) {
   const lowBatteryBoost = Number(b?.batteryPercent ?? 100) < 20 ? 0.15 : 0;
   const base = 0.2;
   return Math.min(base + fill + offlineBoost + lowBatteryBoost, 1);
+}
+
+/* ---------------------------------
+   Pin Marker Icons (your thresholds + OFF label)
+--------------------------------- */
+function markerKindForBin(b) {
+  const fill = Number(b?.fillPercent ?? 0);
+  const offline = !!b?.isOffline;
+
+  // offline always wins
+  if (offline) return "offline";
+
+  // thresholds
+  if (fill >=70) return "red";
+  if (fill >= 40) return "yellow";
+  
+  if (fill >= 11) return "green";
+  return "blue"; // <= 10
+}
+
+function makeDivIcon(kind) {
+  const bg =
+    kind === "offline"
+      ? "#6b7280" // grey
+      : kind === "red"
+      ? "#ef4444" // red
+      : kind === "yellow"
+      ? "#facc15" // yellow
+      : kind === "orange"
+      ? "#f59e0b" // orange
+      : kind === "green"
+      ? "#22c55e" // green
+      : "#3b82f6"; // blue
+
+  // ✅ show OFF keyword only for offline markers
+  const label = kind === "offline" ? "OFF" : "";
+
+  return L.divIcon({
+    className: "",
+    html: `
+      <div style="
+        width:22px;height:22px;border-radius:999px;
+        background:${bg};
+        border:2px solid white;
+        box-shadow:0 2px 10px rgba(0,0,0,.35);
+        display:flex;align-items:center;justify-content:center;
+        font-size:9px;
+        font-weight:800;
+        color:white;
+        letter-spacing:0.2px;
+        text-transform:uppercase;
+      ">${label}</div>
+    `,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -12],
+  });
+}
+
+const iconCache = new Map();
+function getIcon(kind) {
+  if (!iconCache.has(kind)) iconCache.set(kind, makeDivIcon(kind));
+  return iconCache.get(kind);
 }
 
 /**
@@ -103,14 +167,10 @@ const MapBlock = React.memo(function MapBlock({
   enableSyncView,
 }) {
   return (
-    <div className={`relative z-0 rounded-2xl overflow-hidden border border-[rgb(var(--border))] w-full ${heightClass}`}>
-      <MapContainer
-        center={center}
-        zoom={zoom}
-        style={{ height: "100%", width: "100%" }}
-        whenCreated={onMapCreated}
-      >
-        {/* ✅ FIXED: removed extra '}' */}
+    <div
+      className={`relative z-0 rounded-2xl overflow-hidden border border-[rgb(var(--border))] w-full ${heightClass}`}
+    >
+      <MapContainer center={center} zoom={zoom} style={{ height: "100%", width: "100%" }} whenCreated={onMapCreated}>
         <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
         <FitToPoints points={fitPoints} enabled={enableFit} />
@@ -118,20 +178,30 @@ const MapBlock = React.memo(function MapBlock({
 
         <HeatmapLayer points={heatPoints} options={heatOptions} />
 
-        {markerPoints.map((p) => (
-          <CircleMarker key={p.id} center={[p.lat, p.lng]} radius={7} pathOptions={{ weight: 2 }}>
-            <Popup>
-              <div style={{ fontSize: 12, lineHeight: 1.35 }}>
-                <div><b>Bin</b></div>
-                <div>ID: {p.bin?.binId || p.bin?._id}</div>
-                <div>{p.lat.toFixed(6)}, {p.lng.toFixed(6)}</div>
-                <div>Status: {p.bin?.status || "-"}</div>
-                <div>Fill: {p.bin?.fillPercent ?? "-"}%</div>
-                <div>Battery: {p.bin?.batteryPercent ?? "-"}%</div>
-              </div>
-            </Popup>
-          </CircleMarker>
-        ))}
+        {/* ✅ color pins by fill thresholds + OFF label for offline */}
+        {markerPoints.map((p) => {
+          const kind = markerKindForBin(p.bin);
+          return (
+            <Marker key={p.id} position={[p.lat, p.lng]} icon={getIcon(kind)}>
+              <Popup>
+                <div style={{ fontSize: 12, lineHeight: 1.35 }}>
+                  <div>
+                    <b>Bin</b>
+                  </div>
+                  <div>ID: {p.bin?.binId || p.bin?._id}</div>
+                  <div>
+                    {p.lat.toFixed(6)}, {p.lng.toFixed(6)}
+                  </div>
+                  <div>Status: {p.bin?.status || "-"}</div>
+                  <div>Fill: {p.bin?.fillPercent ?? "-"}%</div>
+                  <div>Battery: {p.bin?.batteryPercent ?? "-"}%</div>
+                  <div>Offline: {p.bin?.isOffline ? "YES" : "NO"}</div>
+                  <div>Last Telemetry: {p.bin?.lastTelemetryAt ? String(p.bin.lastTelemetryAt) : "-"}</div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
 
       <div className="absolute left-3 bottom-3 z-[500] rounded-lg bg-black/70 text-white text-xs px-2 py-1">
@@ -326,7 +396,11 @@ export default function AdminBinsHeatmapCard() {
             </div>
           </div>
 
-          <button aria-label="Close fullscreen" className="absolute inset-0 -z-10" onClick={() => setIsFullscreen(false)} />
+          <button
+            aria-label="Close fullscreen"
+            className="absolute inset-0 -z-10"
+            onClick={() => setIsFullscreen(false)}
+          />
         </div>
       )}
     </>
