@@ -29,7 +29,7 @@ L.Icon.Default.mergeOptions({
 });
 
 /* ------------------------------------------------------------------ */
-/* Map picker                                                         */
+/* Map picker                                                          */
 /* ------------------------------------------------------------------ */
 const DEFAULT_CENTER = [27.65407, 85.373695]; // Kathmandu [lat,lng]
 const DEFAULT_ZOOM = 14;
@@ -84,7 +84,10 @@ function MapPicker({ lat, lng, onPick }) {
   return (
     <div className="h-[350px] w-full overflow-hidden rounded-xl border border-app">
       <MapContainer center={position} zoom={zoom} className="h-full w-full" scrollWheelZoom>
-        <TileLayer attribution="© OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <TileLayer
+          attribution="© OpenStreetMap contributors"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
         <FlyToOnChange lat={lat} lng={lng} zoom={16} />
         <AutoLocateOnOpen enabled={!hasCoords} onPick={onPick} />
         <LocationMarker />
@@ -148,9 +151,12 @@ export default function HouseholdSettingsPage() {
   const [virtualBinId, setVirtualBinId] = useState("");
   const [address, setAddress] = useState("");
 
-  // ✅ change: binId should be selected from list
-  const [binId, setBinId] = useState(""); // stores BIN-000001 etc
-  const [binSearch, setBinSearch] = useState(""); // search available ids
+  const [binId, setBinId] = useState("");
+  const [binSearch, setBinSearch] = useState("");
+
+  // ✅ Device fields (required) - CONTROLLED ONLY
+  const [deviceId, setDeviceId] = useState("");
+  const [deviceKey, setDeviceKey] = useState("");
 
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
@@ -158,7 +164,7 @@ export default function HouseholdSettingsPage() {
   const [showMapPicker, setShowMapPicker] = useState(true);
 
   // -----------------------
-  // Queries: zones + virtual bins
+  // Queries
   // -----------------------
   const zonesQ = useQuery({
     queryKey: ["citizen_zones"],
@@ -173,7 +179,6 @@ export default function HouseholdSettingsPage() {
   });
   const vbs = vbsQ.data?.items || [];
 
-  // ✅ Available BIN IDs for citizen (unassigned only)
   const availableBinIdsQ = useQuery({
     queryKey: ["citizen_available_binids", binSearch],
     queryFn: () => sdk.citizen.listAvailableBinIds({ q: binSearch || undefined, limit: 50 }),
@@ -181,19 +186,16 @@ export default function HouseholdSettingsPage() {
   });
   const availableBinIds = availableBinIdsQ.data?.items || [];
 
-  // My households list
   const myHouseholdsQ = useQuery({
     queryKey: ["citizen_my_households"],
     queryFn: () => sdk.citizen.getMyHouseholds(),
   });
   const myHouseholds = myHouseholdsQ.data?.items || [];
 
-  // Auto-select first zone if not selected
   useEffect(() => {
     if (!zoneId && zones.length) setZoneId(safeId(zones[0]));
   }, [zones, zoneId]);
 
-  // When zone changes, reset virtualBinId and auto-select first VB
   useEffect(() => {
     setVirtualBinId("");
   }, [zoneId]);
@@ -233,21 +235,28 @@ export default function HouseholdSettingsPage() {
   }
 
   // -----------------------
-  // Submit: create household + bin
+  // Submit
   // -----------------------
   const create = useMutation({
     mutationFn: async () => {
+      const did = String(deviceId || "").trim();
+      const dkey = String(deviceKey || "").trim();
+
       if (!zoneId) throw new Error("Zone is required");
       if (!virtualBinId) throw new Error("Virtual bin is required");
-      if (!address.trim()) throw new Error("Address is required");
+      if (!address.trim()) throw new Error("Household name is required");
       if (!binId.trim()) throw new Error("Bin ID is required (select from list)");
+      if (!did) throw new Error("Device ID is required");
+      if (!dkey) throw new Error("Device Key is required");
       if (!coordsOk) throw new Error("Valid coordinates required");
 
       return sdk.citizen.createHouseholdWithBin({
         zoneId,
         virtualBinId,
         address: address.trim(),
-        binId: binId.trim(), // ✅ selected from available BinIds
+        binId: binId.trim(),
+        deviceId: did,
+        deviceKey: dkey,
         location: toPoint(lng, lat),
       });
     },
@@ -256,16 +265,18 @@ export default function HouseholdSettingsPage() {
       setAddress("");
       setBinId("");
       setBinSearch("");
+      setDeviceId("");
+      setDeviceKey("");
       setLat("");
       setLng("");
       qc.invalidateQueries({ queryKey: ["citizen_my_households"] });
-      qc.invalidateQueries({ queryKey: ["citizen_available_binids"] }); // ✅ refresh available ids
+      qc.invalidateQueries({ queryKey: ["citizen_available_binids"] });
     },
     onError: (e) => toast.error(pickErrorMessage(e)),
   });
 
   // -----------------------
-  // Delete household (+ bins cascade=1)
+  // ✅ Delete household (+ bins cascade=1) + backend deletes device docs
   // -----------------------
   const del = useMutation({
     mutationFn: async (h) => {
@@ -273,8 +284,11 @@ export default function HouseholdSettingsPage() {
       if (!id) throw new Error("Missing household id");
       return sdk.citizen.deleteHouseholdWithBins(id);
     },
-    onSuccess: () => {
-      toast.success("Household and bins deleted");
+    onSuccess: (res) => {
+      const deletedBins = Number(res?.deletedBins || 0);
+      const deletedDevices = Number(res?.deletedDevices || 0);
+      toast.success(`Deleted. bins=${deletedBins}, devices=${deletedDevices}`);
+
       qc.invalidateQueries({ queryKey: ["citizen_my_households"] });
       qc.invalidateQueries({ queryKey: ["citizen_available_binids"] });
     },
@@ -297,11 +311,16 @@ export default function HouseholdSettingsPage() {
     return h?.planId ? "ACTIVE" : "INACTIVE";
   }
 
+  const deviceIdOk = String(deviceId || "").trim();
+  const deviceKeyOk = String(deviceKey || "").trim();
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Household + Bin Setup" subtitle="Create household + bin in one step. Activate from Billing Plans." />
+      <PageHeader
+        title="Household + Bin Setup"
+        subtitle="Create household + bin in one step. Activate from Billing Plans."
+      />
 
-      {/* ----------------- Create block ----------------- */}
       <Card>
         <CardHeader>
           <div className="text-base font-semibold">Create (one-step)</div>
@@ -311,7 +330,6 @@ export default function HouseholdSettingsPage() {
         </CardHeader>
 
         <CardContent className="grid gap-4">
-          {/* Zone + Virtual Bin */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label>Zone *</Label>
@@ -329,7 +347,11 @@ export default function HouseholdSettingsPage() {
               <Label>Virtual bin *</Label>
               <Select value={virtualBinId} onChange={(e) => setVirtualBinId(e.target.value)}>
                 <option value="">
-                  {vbsQ.isLoading ? "Loading virtual bins..." : zoneId ? "Select virtual bin" : "Select zone first"}
+                  {vbsQ.isLoading
+                    ? "Loading virtual bins..."
+                    : zoneId
+                      ? "Select virtual bin"
+                      : "Select zone first"}
                 </option>
                 {vbs.map((vb) => (
                   <option key={safeId(vb)} value={safeId(vb)}>
@@ -340,7 +362,6 @@ export default function HouseholdSettingsPage() {
             </div>
           </div>
 
-          {/* Address + BinId (UPDATED) */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label>Household Name *</Label>
@@ -350,21 +371,19 @@ export default function HouseholdSettingsPage() {
             <div className="space-y-2">
               <Label>Bin ID *</Label>
 
-              {/* Search available bin ids */}
               <Input
                 value={binSearch}
                 onChange={(e) => setBinSearch(e.target.value)}
                 placeholder="Search available BIN IDs (e.g., 0001)"
               />
 
-              {/* Select available bin id */}
               <Select value={binId} onChange={(e) => setBinId(e.target.value)}>
                 <option value="">
                   {availableBinIdsQ.isLoading
                     ? "Loading available bins..."
                     : availableBinIds.length
-                    ? "Select BIN ID"
-                    : "No BIN IDs available (ask admin to generate)"}
+                      ? "Select BIN ID"
+                      : "No BIN IDs available (ask admin to generate)"}
                 </option>
                 {availableBinIds.map((b) => (
                   <option key={safeId(b) || b.code} value={b.code}>
@@ -388,12 +407,32 @@ export default function HouseholdSettingsPage() {
                 </span>
               </div>
 
-              {/* Optional: show selected */}
-              {binId ? <div className="text-xs text-muted">Selected: <b>{binId}</b></div> : null}
+              {binId ? (
+                <div className="text-xs text-muted">
+                  Selected: <b>{binId}</b>
+                </div>
+              ) : null}
             </div>
           </div>
 
-          {/* Location */}
+          {/* ✅ Device fields (required) */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>Device ID *</Label>
+              <Input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="e.g DEV-KTM-0001" />
+            </div>
+
+            <div>
+              <Label>Device Key *</Label>
+              <Input
+                type="text"
+                value={deviceKey}
+                onChange={(e) => setDeviceKey(e.target.value)}
+                placeholder="Enter key printed on device"
+              />
+            </div>
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label>Latitude *</Label>
@@ -442,7 +481,16 @@ export default function HouseholdSettingsPage() {
 
           <div className="flex justify-end">
             <Button
-              disabled={!zoneId || !virtualBinId || !address.trim() || !binId.trim() || !coordsOk || create.isPending}
+              disabled={
+                !zoneId ||
+                !virtualBinId ||
+                !address.trim() ||
+                !binId.trim() ||
+                !deviceIdOk ||
+                !deviceKeyOk ||
+                !coordsOk ||
+                create.isPending
+              }
               onClick={() => create.mutate()}
             >
               {create.isPending ? "Creating…" : "Create Household + Bin"}
@@ -451,14 +499,18 @@ export default function HouseholdSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* ----------------- My households ----------------- */}
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-base font-semibold">My Households</div>
             <span className="text-sm text-muted">Status shows whether bin is active/inactive.</span>
 
-            <Button type="button" className="ml-auto" variant="secondary" onClick={() => nav("/app/citizen/billing-plans")}>
+            <Button
+              type="button"
+              className="ml-auto"
+              variant="secondary"
+              onClick={() => nav("/app/citizen/billing-plans")}
+            >
               Go to Activate Bin
             </Button>
           </div>
@@ -502,10 +554,16 @@ export default function HouseholdSettingsPage() {
                           variant="danger"
                           disabled={del.isPending}
                           onClick={() => {
-                            if (confirm(`Delete household "${h.address}" and its bins?`)) del.mutate(h);
+                            const msg =
+                              `Delete household "${h.address}"?\n\n` +
+                              `This will also delete:\n` +
+                              `• Bin records\n` +
+                              `• Paired device document (iot_devices)\n\n` +
+                              `Continue?`;
+                            if (confirm(msg)) del.mutate(h);
                           }}
                         >
-                          Delete
+                          {del.isPending ? "Deleting..." : "Delete"}
                         </Button>
                       </TD>
                     </TR>

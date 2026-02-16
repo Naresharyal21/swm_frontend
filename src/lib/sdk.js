@@ -84,8 +84,10 @@ export const sdk = {
     // Membership plans
     listMembershipPlans: (params) => api.get("/admin/membership-plans", { params }).then(unwrap),
     createMembershipPlan: (payload) => api.post("/admin/membership-plans", payload).then(unwrap),
-    updateMembershipPlan: (id, payload) => api.put(`/admin/membership-plans/${id}`, payload).then(unwrap),
-    deactivateMembershipPlan: (id) => api.delete(`/admin/membership-plans/${id}`).then(unwrap),
+    updateMembershipPlan: (id, payload) =>
+      api.put(`/admin/membership-plans/${id}`, payload).then(unwrap),
+    deactivateMembershipPlan: (id) =>
+      api.delete(`/admin/membership-plans/${id}`).then(unwrap),
 
     // Reward Rates
     listRewardRates: (params) => api.get("/admin/reward-rates", { params }).then(unwrap),
@@ -120,8 +122,10 @@ export const sdk = {
     dtListVirtualBins: (params) => api.get("/ops/dt/virtual-bins", { params }).then(unwrap),
 
     listRewardClaims: (params) => api.get("/ops/reward-claims", { params }).then(unwrap),
-    approveRewardClaim: (id, payload) => api.post(`/ops/reward-claims/${id}/approve`, payload).then(unwrap),
-    rejectRewardClaim: (id, payload) => api.post(`/ops/reward-claims/${id}/reject`, payload).then(unwrap),
+    approveRewardClaim: (id, payload) =>
+      api.post(`/ops/reward-claims/${id}/approve`, payload).then(unwrap),
+    rejectRewardClaim: (id, payload) =>
+      api.post(`/ops/reward-claims/${id}/reject`, payload).then(unwrap),
 
     generateInvoices: (payload) => api.post("/ops/billing/generate", payload).then(unwrap),
     postVehicleLocation: (vehicleId, payload) =>
@@ -137,12 +141,16 @@ export const sdk = {
       const fd = new FormData();
       fd.append("file", file);
       return api
-        .post(`/crew/tasks/${id}/proof`, fd, { headers: { "Content-Type": "multipart/form-data" } })
+        .post(`/crew/tasks/${id}/proof`, fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        })
         .then(unwrap);
     },
 
-    verifyRecyclable: (id, payload) => api.post(`/crew/recyclables/${id}/verify`, payload).then(unwrap),
-    rejectRecyclable: (id, payload) => api.post(`/crew/recyclables/${id}/reject`, payload).then(unwrap),
+    verifyRecyclable: (id, payload) =>
+      api.post(`/crew/recyclables/${id}/verify`, payload).then(unwrap),
+    rejectRecyclable: (id, payload) =>
+      api.post(`/crew/recyclables/${id}/reject`, payload).then(unwrap),
 
     listExceptions: (params) => api.get("/crew/exceptions", { params }).then(unwrap),
     createException: (payload) => api.post("/crew/exceptions", payload).then(unwrap),
@@ -165,7 +173,13 @@ export const sdk = {
     listZones: (params) => api.get("/citizen/zones", { params }).then(unwrap),
     listVirtualBins: (params) => api.get("/citizen/virtual-bins", { params }).then(unwrap),
 
-    createHouseholdWithBin: (payload) => api.post("/citizen/household-bins", payload).then(unwrap),
+    /**
+     * ✅ Updated: backend now requires deviceId + deviceKey for pairing into iot_devices.
+     * payload must include:
+     * { zoneId, virtualBinId, address, binId, location, deviceId, deviceKey }
+     */
+    createHouseholdWithBin: (payload) =>
+      api.post("/citizen/household-bins", payload).then(unwrap),
 
     deleteHouseholdWithBins: (householdId) =>
       api.delete(`/citizen/households/${householdId}?cascade=1`).then(unwrap),
@@ -174,9 +188,12 @@ export const sdk = {
     deactivateMyBin: (payload) => api.post("/citizen/deactivate-bin", payload).then(unwrap),
 
     initiateEsewa: (payload) => api.post("/payments/esewa/initiate", payload).then(unwrap),
-    initiateMonthly: (planId) => api.post("/payments/esewa/initiate", { planId, kind: "MONTHLY" }).then(unwrap),
-    initiateDaily: (planId) => api.post("/payments/esewa/initiate", { planId, kind: "DAILY" }).then(unwrap),
-    initiateBulky: (planId) => api.post("/payments/esewa/initiate", { planId, kind: "BULKY" }).then(unwrap),
+    initiateMonthly: (planId) =>
+      api.post("/payments/esewa/initiate", { planId, kind: "MONTHLY" }).then(unwrap),
+    initiateDaily: (planId) =>
+      api.post("/payments/esewa/initiate", { planId, kind: "DAILY" }).then(unwrap),
+    initiateBulky: (planId) =>
+      api.post("/payments/esewa/initiate", { planId, kind: "BULKY" }).then(unwrap),
     esewaStatus: (txUuid) => api.get(`/payments/esewa/status/${txUuid}`).then(unwrap),
 
     updateHouseholdPlan: (householdId, payload) =>
@@ -212,10 +229,9 @@ export const sdk = {
     markAllNotificationsRead: () => api.post("/citizen/notifications/read-all", {}).then(unwrap),
 
     payInvoice: (invoiceId, payload) => api.post(`/citizen/invoices/${invoiceId}/pay`, payload).then(unwrap),
-// Citizen Bin IDs (available/unassigned)
-listAvailableBinIds: (params) =>
-  api.get("/citizen/binids/available", { params }).then(unwrap),
 
-
+    // Citizen Bin IDs (available/unassigned)
+    listAvailableBinIds: (params) =>
+      api.get("/citizen/binids/available", { params }).then(unwrap),
   },
 };

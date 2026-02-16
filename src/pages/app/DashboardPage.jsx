@@ -4,6 +4,7 @@ import { useQueries } from "@tanstack/react-query";
 
 import { sdk } from "../../lib/sdk";
 import { Link } from "react-router-dom";
+
 import { formatMoney } from "../../lib/utils";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -97,7 +98,7 @@ function StatCard({ title, value, hint, icon: Icon, trend, color = "blue" }) {
   };
 
   return (
-    <Card 
+    <Card
       className={`
         relative overflow-hidden border-2 bg-gradient-to-br 
         ${lightGradients[color]} ${darkGradients[color]}
@@ -123,11 +124,10 @@ function StatCard({ title, value, hint, icon: Icon, trend, color = "blue" }) {
               </div>
             )}
             {trend && (
-              <div className={`flex items-center gap-1 text-xs font-semibold mt-2 ${
-                trend > 0 
-                  ? 'text-green-600 dark:text-green-400' 
+              <div className={`flex items-center gap-1 text-xs font-semibold mt-2 ${trend > 0
+                  ? 'text-green-600 dark:text-green-400'
                   : 'text-red-600 dark:text-red-400'
-              }`}>
+                }`}>
                 <TrendingUp className={`h-3 w-3 ${trend < 0 ? 'rotate-180' : ''}`} />
                 {Math.abs(trend)}% vs last period
               </div>
@@ -183,26 +183,26 @@ function WelcomeHeader({ role, user }) {
     ">
       {/* Overlay for dark mode depth */}
       <div className="absolute inset-0 bg-black/10 dark:bg-black/30"></div>
-      
+
       {/* Animated blur circles - adjusted for dark mode */}
       <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10 dark:bg-white/5 blur-3xl"></div>
       <div className="absolute -bottom-8 -left-8 h-40 w-40 rounded-full bg-white/10 dark:bg-white/5 blur-3xl"></div>
-      
+
       {/* Subtle grid pattern for dark mode */}
-      <div className="absolute inset-0 opacity-10 dark:opacity-5" 
-           style={{
-             backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)',
-             backgroundSize: '20px 20px'
-           }}>
+      <div className="absolute inset-0 opacity-10 dark:opacity-5"
+        style={{
+          backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)',
+          backgroundSize: '20px 20px'
+        }}>
       </div>
-      
+
       <div className="relative z-10">
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3 mb-2">
               <RoleIcon className="h-8 w-8 drop-shadow-lg" />
-              <Badge 
-                variant="secondary" 
+              <Badge
+                variant="secondary"
                 className="
                   text-xs font-semibold 
                   bg-white/20 dark:bg-white/10 
@@ -251,17 +251,19 @@ function QuickActionButton({ to, icon: Icon, label, description }) {
       ">
         <CardContent className="p-6">
           <div className="flex items-start gap-4">
-            <div className="
-              p-3 rounded-xl 
-              bg-primary/10 dark:bg-primary/20
-              text-primary dark:text-primary-foreground
-              group-hover:bg-primary 
-              group-hover:text-white dark:group-hover:text-white
-              transition-colors duration-300
-              shadow-sm dark:shadow-primary/10
-            ">
-              <Icon className="h-6 w-6" />
-            </div>
+            <div
+  className="
+    p-3 rounded-xl
+    bg-primary/10 dark:bg-primary/20
+    text-primary dark:text-primary-foreground
+    group-hover:bg-primary
+    group-hover:text-primary-foreground
+    transition-colors duration-300
+    shadow-sm dark:shadow-primary/10
+  "
+>
+  <Icon className="h-6 w-6 stroke-current" />
+</div>
             <div className="flex-1">
               <div className="
                 font-semibold text-base mb-1 
@@ -300,8 +302,8 @@ function SectionHeader({ icon: Icon, title, badge }) {
         {title}
       </h2>
       {badge && (
-        <Badge 
-          variant="outline" 
+        <Badge
+          variant="outline"
           className="text-xs border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400"
         >
           {badge}
@@ -319,27 +321,27 @@ export default function DashboardPage() {
   const queryConfigs =
     role === "ADMIN"
       ? [
-          { key: "users", queryKey: ["users"], queryFn: () => sdk.admin.listUsers() },
-          { key: "zones", queryKey: ["zones"], queryFn: () => sdk.admin.listZones() },
-          { key: "households", queryKey: ["households"], queryFn: () => sdk.admin.listHouseholds() },
-          { key: "bins", queryKey: ["bins"], queryFn: () => sdk.admin.listBins() },
-          { key: "vehicles", queryKey: ["vehicles"], queryFn: () => sdk.admin.listVehicles() },
-        ]
+        { key: "users", queryKey: ["users"], queryFn: () => sdk.admin.listUsers() },
+        { key: "zones", queryKey: ["zones"], queryFn: () => sdk.admin.listZones() },
+        { key: "households", queryKey: ["households"], queryFn: () => sdk.admin.listHouseholds() },
+        { key: "bins", queryKey: ["bins"], queryFn: () => sdk.admin.listBins() },
+        { key: "vehicles", queryKey: ["vehicles"], queryFn: () => sdk.admin.listVehicles() },
+      ]
       : role === "SUPERVISOR"
         ? [
-            { key: "ops_cases", queryKey: ["ops_cases"], queryFn: () => sdk.ops.listCases() },
-            { key: "ops_tasks", queryKey: ["ops_tasks"], queryFn: () => sdk.ops.listTasks() },
-          ]
+          { key: "ops_cases", queryKey: ["ops_cases"], queryFn: () => sdk.ops.listCases() },
+          { key: "ops_tasks", queryKey: ["ops_tasks"], queryFn: () => sdk.ops.listTasks() },
+        ]
         : role === "CREW"
           ? [
-              { key: "crew_today", queryKey: ["crew_today"], queryFn: () => sdk.crew.todayRoute({}) },
-              { key: "crew_tasks", queryKey: ["crew_tasks"], queryFn: () => sdk.crew.listMyTasks({}) },
-            ]
+            { key: "crew_today", queryKey: ["crew_today"], queryFn: () => sdk.crew.todayRoute({}) },
+            { key: "crew_tasks", queryKey: ["crew_tasks"], queryFn: () => sdk.crew.listMyTasks({}) },
+          ]
           : [
-              { key: "wallet", queryKey: ["wallet"], queryFn: () => sdk.citizen.wallet() },
-              { key: "invoices", queryKey: ["invoices"], queryFn: () => sdk.citizen.listInvoices() },
-              { key: "notifications", queryKey: ["notifications"], queryFn: () => sdk.citizen.notifications({ unreadOnly: true }) },
-            ];
+            { key: "wallet", queryKey: ["wallet"], queryFn: () => sdk.citizen.wallet() },
+            { key: "invoices", queryKey: ["invoices"], queryFn: () => sdk.citizen.listInvoices() },
+            { key: "notifications", queryKey: ["notifications"], queryFn: () => sdk.citizen.notifications({ unreadOnly: true }) },
+          ];
 
   const queryResults = useQueries({ queries: queryConfigs });
 
@@ -511,7 +513,7 @@ export default function DashboardPage() {
             <StatCard
               title="Wallet Balance"
               value={`Rs. ${formatMoney(data.wallet?.balance || 0)}`}
-              icon={DollarSign}
+
               color="green"
               trend={15.2}
               hint="Available funds"
@@ -544,7 +546,7 @@ export default function DashboardPage() {
       {/* Quick Actions Section */}
       <div>
         <SectionHeader icon={Zap} title="Quick Actions" badge="Most Used" />
-        
+
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {role === "ADMIN" && (
             <>
@@ -605,7 +607,7 @@ export default function DashboardPage() {
                 Pro Tip
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Keep your backend seed script updated and add missing edit/delete endpoints when needed. 
+                Keep your backend seed script updated and add missing edit/delete endpoints when needed.
                 The UI will automatically enable those actions once the APIs exist.
               </p>
             </div>
